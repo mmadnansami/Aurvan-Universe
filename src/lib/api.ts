@@ -1,6 +1,13 @@
-import { dispatchFirebaseApi } from './firebaseBackend';
-
 const TOKEN_STORAGE_KEY = 'aurvan_session_token';
+
+let backendModulePromise: Promise<typeof import('./firebaseBackend')> | null = null;
+
+function loadFirebaseBackend() {
+  if (!backendModulePromise) {
+    backendModulePromise = import('./firebaseBackend');
+  }
+  return backendModulePromise;
+}
 
 export function getStoredToken(): string | null {
   try {
@@ -35,6 +42,7 @@ export class ApiError extends Error {
 export async function apiFetch<T = any>(path: string, options: RequestInit = {}): Promise<T> {
   if (path.startsWith('/api/')) {
     try {
+      const { dispatchFirebaseApi } = await loadFirebaseBackend();
       return await dispatchFirebaseApi<T>(path, options);
     } catch (err: any) {
       let message = err?.message || 'Cloud service request failed.';

@@ -128,10 +128,111 @@ async function readBoundedAssetDataUrl(file: File): Promise<string> {
   return dataUrl;
 }
 
-async function getRawBootstrap(): Promise<BootstrapPayload> {
+const PUBLIC_BOOTSTRAP_CACHE_KEY = 'aurvan_cache_bootstrap_v1';
+const PUBLIC_CASES_CACHE_KEY = 'aurvan_cache_cases_v1';
+const PUBLISHED_CASES_MEMORY_TTL_MS = 30_000;
+
+let publishedCasesCache: { rows: any[]; fetchedAt: number } | null = null;
+let publishedCasesInFlight: Promise<any[]> | null = null;
+
+function withTimeout<T>(promise: Promise<T>, ms: number, fallback: T): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    let settled = false;
+    const timer = setTimeout(() => {
+      if (!settled) {
+        settled = true;
+        resolve(fallback);
+      }
+    }, ms);
+
+    promise.then(
+      (val) => {
+        if (!settled) {
+          settled = true;
+          clearTimeout(timer);
+          resolve(val);
+        }
+      },
+      (err) => {
+        if (!settled) {
+          settled = true;
+          clearTimeout(timer);
+          reject(err);
+        }
+      }
+    );
+  });
+}
+
+function readLocalCache<T>(key: string): T | null {
+  if (typeof window === 'undefined') return null;
   try {
-    const snap = await getDoc(doc(db, 'platform', 'bootstrap'));
-    if (snap.exists()) {
+    const raw = window.localStorage.getItem(key);
+    return raw ? (JSON.parse(raw) as T) : null;
+  } catch {
+    return null;
+  }
+}
+
+function writeLocalCache(key: string, value: unknown): void {
+  if (typeof window === 'undefined') return;
+  try {
+    window.localStorage.setItem(key, JSON.stringify(value));
+  } catch {
+    // Ignore storage quota errors
+  }
+}
+
+function invalidatePublicCaches(): void {
+  publishedCasesCache = null;
+  publishedCasesInFlight = null;
+  if (typeof window === 'undefined') return;
+  try {
+    window.localStorage.removeItem(PUBLIC_BOOTSTRAP_CACHE_KEY);
+    window.localStorage.removeItem(PUBLIC_CASES_CACHE_KEY);
+  } catch {
+    // Ignore storage errors
+  }
+}
+
+async function fetchPublishedCaseRows(): Promise<any[]> {
+  const now = Date.now();
+  if (publishedCasesCache && now - publishedCasesCache.fetchedAt < PUBLISHED_CASES_MEMORY_TTL_MS) {
+    return publishedCasesCache.rows;
+  }
+  if (publishedCasesInFlight) {
+    return publishedCasesInFlight;
+  }
+
+  publishedCasesInFlight = (async () => {
+    try {
+      const snap = await withTimeout(
+        getDocs(query(collection(db, 'cases'), where('status', '==', 'PUBLISHED'))),
+        3500,
+        null
+      );
+      if (snap) {
+        const rows = snap.docs.map((d) => d.data());
+        publishedCasesCache = { rows, fetchedAt: Date.now() };
+        return rows;
+      }
+      const cached = readLocalCache<{ cases?: any[] }>(PUBLIC_CASES_CACHE_KEY);
+      return Array.isArray(cached?.cases) ? cached.cases : [];
+    } catch {
+      const cached = readLocalCache<{ cases?: any[] }>(PUBLIC_CASES_CACHE_KEY);
+      return Array.isArray(cached?.cases) ? cached.cases : [];
+    } finally {
+      publishedCasesInFlight = null;
+    }
+  })();
+
+  return publishedCasesInFlight;
+}
+
+async function getRawBootstrap(timeoutMs = 3500): Promise<BootstrapPayload> {
+  try {
+    const snap = await withTimeout(getDoc(doc(db, 'platform', 'bootstrap')), timeoutMs, null);
+    if (snap && snap.exists()) {
       const data = snap.data();
       const merged: BootstrapPayload = {
         settings: { ...DEFAULT_BOOTSTRAP_DATA.settings, ...(data.settings || {}) },
@@ -156,6 +257,10 @@ async function getRawBootstrap(): Promise<BootstrapPayload> {
   } catch {
     // Public fallback preserves site content even on network hiccups
   }
+  const cached = readLocalCache<BootstrapPayload>(PUBLIC_BOOTSTRAP_CACHE_KEY);
+  if (cached && isValidBootstrapPayload(cached)) {
+    return cached;
+  }
   return JSON.parse(JSON.stringify(DEFAULT_BOOTSTRAP_DATA)) as BootstrapPayload;
 }
 
@@ -170,6 +275,7 @@ async function saveBootstrapPayload(payload: BootstrapPayload): Promise<void> {
       regions: payload.regions,
       updatedAt: serverTimestamp(),
     });
+    invalidatePublicCaches();
   } catch (error) {
     handleFirestoreError(error, OperationType.WRITE, path);
   }
@@ -349,16 +455,10 @@ async function requireAdminUser(): Promise<PublicUser> {
 
 // ── Public Operations ────────────────────────────────────────────────────────
 async function handlePublicBootstrap(): Promise<BootstrapPayload> {
-  const boot = await getRawBootstrap();
-  let publishedCases: any[] = [];
-  try {
-    const snap = await getDocs(
-      query(collection(db, 'cases'), where('status', '==', 'PUBLISHED'))
-    );
-    publishedCases = snap.docs.map((d) => d.data());
-  } catch {
-    publishedCases = [];
-  }
+  const [boot, publishedCases] = await Promise.all([
+    getRawBootstrap(3500),
+    fetchPublishedCaseRows(),
+  ]);
 
   const countByRegion = new Map<number, number>();
   for (const c of publishedCases) {
@@ -366,13 +466,15 @@ async function handlePublicBootstrap(): Promise<BootstrapPayload> {
     countByRegion.set(rId, (countByRegion.get(rId) || 0) + 1);
   }
 
-  return {
+  const payload: BootstrapPayload = {
     ...boot,
     regions: boot.regions.map((reg) => ({
       ...reg,
       published_case_count: countByRegion.get(reg.id) || 0,
     })),
   };
+  writeLocalCache(PUBLIC_BOOTSTRAP_CACHE_KEY, payload);
+  return payload;
 }
 
 async function handlePublicCases(searchParams: URLSearchParams): Promise<{ cases: PublicCaseSummary[] }> {
@@ -383,14 +485,34 @@ async function handlePublicCases(searchParams: URLSearchParams): Promise<{ cases
     : null;
   const difficulty = (searchParams.get('difficulty') || '').trim();
 
-  let rows: any[] = [];
-  try {
-    const snap = await getDocs(
-      query(collection(db, 'cases'), where('status', '==', 'PUBLISHED'))
-    );
-    rows = snap.docs.map((d) => d.data());
-  } catch (error) {
-    handleFirestoreError(error, OperationType.LIST, 'cases');
+  const rows = await fetchPublishedCaseRows();
+
+  const toSummary = (c: any): PublicCaseSummary => ({
+    id: c.id,
+    case_code: c.case_code,
+    title: c.title,
+    slug: c.slug,
+    short_description: c.short_description,
+    institution_id: c.institution_id,
+    institution_code: c.institution_code,
+    institution_name: c.institution_name,
+    region_id: c.region_id,
+    region_name: c.region_name,
+    difficulty: c.difficulty,
+    estimated_duration: c.estimated_duration,
+    status: c.status,
+    cover_image_url: c.cover_image_url || null,
+    thumbnail_url: c.thumbnail_url || null,
+    min_rank_order: Number(c.min_rank_order || 1),
+    published_at: c.published_at || null,
+  });
+
+  if (!search && !regionId && !institutionId && !difficulty) {
+    const sortedAll = [...rows]
+      .sort((a, b) => String(b.published_at || '').localeCompare(String(a.published_at || '')))
+      .map(toSummary);
+    writeLocalCache(PUBLIC_CASES_CACHE_KEY, { cases: sortedAll });
+    return { cases: sortedAll };
   }
 
   const filtered = rows
@@ -411,33 +533,18 @@ async function handlePublicCases(searchParams: URLSearchParams): Promise<{ cases
     .sort((a, b) => String(b.published_at || '').localeCompare(String(a.published_at || '')));
 
   return {
-    cases: filtered.map((c) => ({
-      id: c.id,
-      case_code: c.case_code,
-      title: c.title,
-      slug: c.slug,
-      short_description: c.short_description,
-      institution_id: c.institution_id,
-      institution_code: c.institution_code,
-      institution_name: c.institution_name,
-      region_id: c.region_id,
-      region_name: c.region_name,
-      difficulty: c.difficulty,
-      estimated_duration: c.estimated_duration,
-      status: c.status,
-      cover_image_url: c.cover_image_url || null,
-      thumbnail_url: c.thumbnail_url || null,
-      min_rank_order: Number(c.min_rank_order || 1),
-      published_at: c.published_at || null,
-    })),
+    cases: filtered.map(toSummary),
   };
 }
 
 async function handleHallOfFame() {
   try {
-    const snap = await getDocs(
-      query(collection(db, 'users'), where('approved_cases_count', '>', 0))
+    const snap = await withTimeout(
+      getDocs(query(collection(db, 'users'), where('approved_cases_count', '>', 0))),
+      3500,
+      null
     );
+    if (!snap) return { entries: [] };
     const entries = snap.docs
       .map((d) => d.data())
       .filter((u) => u.status === 'ACTIVE' && u.role === 'PLAYER')
@@ -1481,6 +1588,7 @@ export async function dispatchFirebaseApi<T = any>(
         min_rank_order: Number(b.min_rank_order || existing.min_rank_order || 1),
         updatedAt: serverTimestamp(),
       });
+      invalidatePublicCaches();
       await writeAdminLog(adminUser, 'CASE_UPDATED', 'CASE', caseId, `Updated metadata for case ${existing.case_code}`);
       return (await getFullCaseBundle(caseId)) as T;
     }
@@ -1497,6 +1605,7 @@ export async function dispatchFirebaseApi<T = any>(
       }
       await deleteDoc(doc(db, 'caseSolutions', caseId)).catch(() => undefined);
       await deleteDoc(doc(db, 'cases', caseId));
+      invalidatePublicCaches();
       await writeAdminLog(adminUser, 'CASE_DELETED', 'CASE', caseId, `Deleted case ${existing.case_code}: ${existing.title}`);
       return { success: true } as T;
     }
@@ -1530,6 +1639,7 @@ export async function dispatchFirebaseApi<T = any>(
       updatedAt: serverTimestamp(),
     });
     await syncCaseCountsAndStatus(caseId, targetStatus);
+    invalidatePublicCaches();
     const actionName =
       targetStatus === 'PUBLISHED'
         ? 'CASE_PUBLISHED'

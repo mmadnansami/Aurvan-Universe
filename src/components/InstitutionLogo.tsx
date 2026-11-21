@@ -20,6 +20,8 @@ export function InstitutionLogo({ logoUrl, name, shortName, size = 'md' }: Insti
           src={logoUrl}
           alt={`${name} official emblem`}
           referrerPolicy="no-referrer"
+          loading="lazy"
+          decoding="async"
           className="h-full w-full object-contain"
         />
       </div>

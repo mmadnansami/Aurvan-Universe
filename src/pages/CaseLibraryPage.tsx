@@ -6,18 +6,34 @@ import { apiFetch } from '../lib/api';
 import { isPlayerEligibleForCase } from '../shared/validation';
 import type { PublicCaseSummary } from '../shared/types';
 
+const PUBLIC_CASES_CACHE_KEY = 'aurvan_cache_cases_v1';
+
+function readCachedCases(): PublicCaseSummary[] | null {
+  if (typeof window === 'undefined') return null;
+  try {
+    const raw = window.localStorage.getItem(PUBLIC_CASES_CACHE_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed?.cases) ? parsed.cases : null;
+  } catch {
+    return null;
+  }
+}
+
 export function CaseLibraryPage() {
   const { bootstrap, user } = usePlatform();
   const [searchParams] = useSearchParams();
-  const [cases, setCases] = useState<PublicCaseSummary[]>([]);
-  const [loading, setLoading] = useState(true);
+  const initialRegion = searchParams.get('region') || '';
+  const initialCached = !initialRegion ? readCachedCases() : null;
+  const [cases, setCases] = useState<PublicCaseSummary[]>(() => initialCached ?? []);
+  const [loading, setLoading] = useState(() => initialCached === null);
   const [search, setSearch] = useState('');
-  const [regionId, setRegionId] = useState(searchParams.get('region') || '');
+  const [regionId, setRegionId] = useState(initialRegion);
   const [institutionId, setInstitutionId] = useState('');
   const [difficulty, setDifficulty] = useState('');
 
-  const fetchCases = async () => {
-    setLoading(true);
+  const fetchCases = async (silent = false) => {
+    if (!silent) setLoading(true);
     try {
       const qs = new URLSearchParams();
       if (search.trim()) qs.set('search', search.trim());
@@ -27,14 +43,15 @@ export function CaseLibraryPage() {
       const res = await apiFetch<{ cases: PublicCaseSummary[] }>(`/api/public/cases?${qs.toString()}`);
       setCases(res.cases);
     } catch {
-      setCases([]);
+      setCases((prev) => (silent && prev.length > 0 ? prev : []));
     } finally {
       setLoading(false);
     }
   };
 
   useEffect(() => {
-    fetchCases();
+    const canSilent = !search.trim() && !regionId && !institutionId && !difficulty && readCachedCases() !== null;
+    void fetchCases(canSilent);
   }, [regionId, institutionId, difficulty]);
 
   const regions = bootstrap?.regions || [];
@@ -120,7 +137,7 @@ export function CaseLibraryPage() {
           <div className="lg:col-span-1">
             <button
               type="button"
-              onClick={fetchCases}
+              onClick={() => fetchCases(false)}
               className="w-full rounded-md bg-[#C9A45C] px-3 py-2 text-xs font-semibold text-[#070B13] hover:bg-[#D8B774]"
             >
               Filter
@@ -169,6 +186,8 @@ export function CaseLibraryPage() {
                           src={c.cover_image_url}
                           alt={c.title}
                           referrerPolicy="no-referrer"
+                          loading="lazy"
+                          decoding="async"
                           className="h-full w-full object-cover"
                         />
                       </div>

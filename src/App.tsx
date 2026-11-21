@@ -5,11 +5,22 @@ import { ErrorBoundary } from './components/ErrorBoundary';
 import { Navbar } from './components/Navbar';
 import { Footer } from './components/Footer';
 import { HomePage } from './pages/HomePage';
-import { UniversePage } from './pages/UniversePage';
-import { InstitutionsPage } from './pages/InstitutionsPage';
-import { RegionsPage } from './pages/RegionsPage';
-import { CaseLibraryPage } from './pages/CaseLibraryPage';
-import { CareerPage } from './pages/CareerPage';
+
+const UniversePage = lazy(() =>
+  import('./pages/UniversePage').then((m) => ({ default: m.UniversePage }))
+);
+const InstitutionsPage = lazy(() =>
+  import('./pages/InstitutionsPage').then((m) => ({ default: m.InstitutionsPage }))
+);
+const RegionsPage = lazy(() =>
+  import('./pages/RegionsPage').then((m) => ({ default: m.RegionsPage }))
+);
+const CaseLibraryPage = lazy(() =>
+  import('./pages/CaseLibraryPage').then((m) => ({ default: m.CaseLibraryPage }))
+);
+const CareerPage = lazy(() =>
+  import('./pages/CareerPage').then((m) => ({ default: m.CareerPage }))
+);
 
 const HallOfFamePage = lazy(() =>
   import('./pages/HallOfFamePage').then((m) => ({ default: m.HallOfFamePage }))

@@ -1,17 +1,5 @@
 import React, { createContext, useCallback, useContext, useEffect, useState } from 'react';
-import {
-  createUserWithEmailAndPassword,
-  onAuthStateChanged,
-  sendEmailVerification,
-  sendPasswordResetEmail,
-  signInWithEmailAndPassword,
-  signInWithPopup,
-  signOut,
-  updateProfile,
-} from 'firebase/auth';
 import { apiFetch, setStoredToken } from '../lib/api';
-import { auth, googleProvider } from '../lib/firebase';
-import { ensureFirebaseUserProfile } from '../lib/firebaseBackend';
 import {
   DEFAULT_BOOTSTRAP_DATA,
   isValidBootstrapPayload,
@@ -20,6 +8,84 @@ import {
 import type { PublicUser } from '../shared/types';
 
 export type BootstrapData = BootstrapPayload;
+
+const BOOTSTRAP_CACHE_KEY = 'aurvan_cache_bootstrap_v1';
+const AUTH_HINT_KEY = 'aurvan_has_auth_hint';
+
+function readCachedBootstrap(): BootstrapData {
+  if (typeof window === 'undefined') return DEFAULT_BOOTSTRAP_DATA;
+  try {
+    const raw = window.localStorage.getItem(BOOTSTRAP_CACHE_KEY);
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      if (isValidBootstrapPayload(parsed)) {
+        return {
+          ...DEFAULT_BOOTSTRAP_DATA,
+          ...parsed,
+          settings: { ...DEFAULT_BOOTSTRAP_DATA.settings, ...(parsed.settings || {}) },
+          content: { ...DEFAULT_BOOTSTRAP_DATA.content, ...(parsed.content || {}) },
+        };
+      }
+    }
+  } catch {
+    // Fallback cleanly to default bootstrap
+  }
+  return DEFAULT_BOOTSTRAP_DATA;
+}
+
+function readAuthHint(): boolean {
+  if (typeof window === 'undefined') return false;
+  try {
+    return window.localStorage.getItem(AUTH_HINT_KEY) === '1';
+  } catch {
+    return false;
+  }
+}
+
+function writeAuthHint(active: boolean): void {
+  if (typeof window === 'undefined') return;
+  try {
+    if (active) {
+      window.localStorage.setItem(AUTH_HINT_KEY, '1');
+    } else {
+      window.localStorage.removeItem(AUTH_HINT_KEY);
+    }
+  } catch {
+    // Ignore storage errors
+  }
+}
+
+function isAuthSensitivePath(): boolean {
+  if (typeof window === 'undefined') return false;
+  const p = window.location.pathname || '/';
+  return (
+    p.startsWith('/auth') ||
+    p.startsWith('/dashboard') ||
+    p.startsWith('/admin') ||
+    p.startsWith('/investigate')
+  );
+}
+
+let firebaseModulesPromise: Promise<{
+  firebaseAuth: typeof import('firebase/auth');
+  firebaseLib: typeof import('../lib/firebase');
+  firebaseBackend: typeof import('../lib/firebaseBackend');
+}> | null = null;
+
+function loadFirebaseModules() {
+  if (!firebaseModulesPromise) {
+    firebaseModulesPromise = Promise.all([
+      import('firebase/auth'),
+      import('../lib/firebase'),
+      import('../lib/firebaseBackend'),
+    ]).then(([firebaseAuth, firebaseLib, firebaseBackend]) => ({
+      firebaseAuth,
+      firebaseLib,
+      firebaseBackend,
+    }));
+  }
+  return firebaseModulesPromise;
+}
 
 interface PlatformContextValue {
   user: PublicUser | null;
@@ -70,8 +136,8 @@ function mapFirebaseAuthError(err: any): string {
 
 export function PlatformProvider({ children }: { children: React.ReactNode }) {
   const [user, setUser] = useState<PublicUser | null>(null);
-  const [bootstrap, setBootstrap] = useState<BootstrapData | null>(DEFAULT_BOOTSTRAP_DATA);
-  const [loading, setLoading] = useState(true);
+  const [bootstrap, setBootstrap] = useState<BootstrapData | null>(() => readCachedBootstrap());
+  const [loading, setLoading] = useState(() => readAuthHint() || isAuthSensitivePath());
 
   const refreshBootstrap = useCallback(async () => {
     try {
@@ -80,22 +146,26 @@ export function PlatformProvider({ children }: { children: React.ReactNode }) {
         setBootstrap(data);
       }
     } catch {
-      // Preserve canonical DEFAULT_BOOTSTRAP_DATA on transient network errors
+      // Preserve cached or canonical DEFAULT_BOOTSTRAP_DATA on transient network errors
     }
   }, []);
 
   const refreshUser = useCallback(async () => {
-    const current = auth.currentUser;
+    const { firebaseAuth, firebaseLib, firebaseBackend } = await loadFirebaseModules();
+    const current = firebaseLib.auth.currentUser;
     if (!current) {
+      writeAuthHint(false);
       setUser(null);
       return;
     }
     try {
-      const profile = await ensureFirebaseUserProfile(current);
+      const profile = await firebaseBackend.ensureFirebaseUserProfile(current);
       if (profile.status === 'SUSPENDED') {
-        await signOut(auth);
+        await firebaseAuth.signOut(firebaseLib.auth);
+        writeAuthHint(false);
         setUser(null);
       } else {
+        writeAuthHint(true);
         setUser(profile);
       }
     } catch {
@@ -105,48 +175,84 @@ export function PlatformProvider({ children }: { children: React.ReactNode }) {
 
   useEffect(() => {
     let active = true;
-    void refreshBootstrap();
+    let unsubscribe: (() => void) | null = null;
+    let idleTimer: ReturnType<typeof setTimeout> | null = null;
+    const immediateAuth = readAuthHint() || isAuthSensitivePath();
 
-    const unsubscribe = onAuthStateChanged(auth, async (firebaseUser) => {
-      if (!active) return;
-      if (!firebaseUser) {
-        setUser(null);
-        setLoading(false);
-        return;
-      }
+    const safetyTimer = immediateAuth
+      ? setTimeout(() => {
+          if (active) setLoading(false);
+        }, 6000)
+      : null;
+
+    const initFirebaseAndData = async () => {
+      void refreshBootstrap();
       try {
-        const profile = await ensureFirebaseUserProfile(firebaseUser);
+        const { firebaseAuth, firebaseLib, firebaseBackend } = await loadFirebaseModules();
         if (!active) return;
-        if (profile.status === 'SUSPENDED') {
-          await signOut(auth);
-          setUser(null);
-        } else {
-          setUser(profile);
-          if (profile.role === 'SUPER_ADMIN' || profile.role === 'ADMIN') {
-            void refreshBootstrap();
+
+        unsubscribe = firebaseAuth.onAuthStateChanged(firebaseLib.auth, async (firebaseUser) => {
+          if (!active) return;
+          if (!firebaseUser) {
+            writeAuthHint(false);
+            setUser(null);
+            setLoading(false);
+            return;
           }
-        }
+          try {
+            const profile = await firebaseBackend.ensureFirebaseUserProfile(firebaseUser);
+            if (!active) return;
+            if (profile.status === 'SUSPENDED') {
+              await firebaseAuth.signOut(firebaseLib.auth);
+              writeAuthHint(false);
+              setUser(null);
+            } else {
+              writeAuthHint(true);
+              setUser(profile);
+              if (profile.role === 'SUPER_ADMIN' || profile.role === 'ADMIN') {
+                void refreshBootstrap();
+              }
+            }
+          } catch {
+            if (active) setUser(null);
+          } finally {
+            if (active) setLoading(false);
+          }
+        });
       } catch {
-        if (active) setUser(null);
-      } finally {
         if (active) setLoading(false);
       }
-    });
+    };
+
+    if (immediateAuth) {
+      void initFirebaseAndData();
+    } else {
+      idleTimer = setTimeout(() => {
+        if (active) {
+          void initFirebaseAndData();
+        }
+      }, 350);
+    }
 
     return () => {
       active = false;
-      unsubscribe();
+      if (safetyTimer) clearTimeout(safetyTimer);
+      if (idleTimer) clearTimeout(idleTimer);
+      if (unsubscribe) unsubscribe();
     };
   }, [refreshBootstrap]);
 
   const loginWithGoogle = useCallback(async () => {
     try {
-      const cred = await signInWithPopup(auth, googleProvider);
-      const profile = await ensureFirebaseUserProfile(cred.user);
+      const { firebaseAuth, firebaseLib, firebaseBackend } = await loadFirebaseModules();
+      const cred = await firebaseAuth.signInWithPopup(firebaseLib.auth, firebaseLib.googleProvider);
+      const profile = await firebaseBackend.ensureFirebaseUserProfile(cred.user);
       if (profile.status === 'SUSPENDED') {
-        await signOut(auth);
+        await firebaseAuth.signOut(firebaseLib.auth);
+        writeAuthHint(false);
         throw new Error('Your account is currently suspended. Contact the Directorate.');
       }
+      writeAuthHint(true);
       setUser(profile);
       await refreshBootstrap();
       return profile;
@@ -158,19 +264,27 @@ export function PlatformProvider({ children }: { children: React.ReactNode }) {
   const login = useCallback(
     async (email: string, password: string) => {
       try {
-        const cred = await signInWithEmailAndPassword(auth, email.trim(), password);
+        const { firebaseAuth, firebaseLib, firebaseBackend } = await loadFirebaseModules();
+        const cred = await firebaseAuth.signInWithEmailAndPassword(
+          firebaseLib.auth,
+          email.trim(),
+          password
+        );
         if (!cred.user.emailVerified) {
-          await sendEmailVerification(cred.user).catch(() => undefined);
-          await signOut(auth);
+          await firebaseAuth.sendEmailVerification(cred.user).catch(() => undefined);
+          await firebaseAuth.signOut(firebaseLib.auth);
+          writeAuthHint(false);
           throw new Error(
             'Please verify your email address first (check your inbox), or click "Continue with Google" for instant verified access.'
           );
         }
-        const profile = await ensureFirebaseUserProfile(cred.user);
+        const profile = await firebaseBackend.ensureFirebaseUserProfile(cred.user);
         if (profile.status === 'SUSPENDED') {
-          await signOut(auth);
+          await firebaseAuth.signOut(firebaseLib.auth);
+          writeAuthHint(false);
           throw new Error('Your account is currently suspended. Contact the Directorate.');
         }
+        writeAuthHint(true);
         setUser(profile);
         await refreshBootstrap();
         return profile;
@@ -183,12 +297,20 @@ export function PlatformProvider({ children }: { children: React.ReactNode }) {
 
   const register = useCallback(async (fullName: string, email: string, password: string) => {
     try {
-      const cred = await createUserWithEmailAndPassword(auth, email.trim(), password);
+      const { firebaseAuth, firebaseLib } = await loadFirebaseModules();
+      const cred = await firebaseAuth.createUserWithEmailAndPassword(
+        firebaseLib.auth,
+        email.trim(),
+        password
+      );
       if (fullName.trim()) {
-        await updateProfile(cred.user, { displayName: fullName.trim() }).catch(() => undefined);
+        await firebaseAuth
+          .updateProfile(cred.user, { displayName: fullName.trim() })
+          .catch(() => undefined);
       }
-      await sendEmailVerification(cred.user).catch(() => undefined);
-      await signOut(auth);
+      await firebaseAuth.sendEmailVerification(cred.user).catch(() => undefined);
+      await firebaseAuth.signOut(firebaseLib.auth);
+      writeAuthHint(false);
       return {
         user: {
           id: cred.user.uid,
@@ -216,7 +338,8 @@ export function PlatformProvider({ children }: { children: React.ReactNode }) {
 
   const sendPasswordReset = useCallback(async (email: string) => {
     try {
-      await sendPasswordResetEmail(auth, email.trim());
+      const { firebaseAuth, firebaseLib } = await loadFirebaseModules();
+      await firebaseAuth.sendPasswordResetEmail(firebaseLib.auth, email.trim());
     } catch (err: any) {
       throw new Error(mapFirebaseAuthError(err));
     }
@@ -224,8 +347,10 @@ export function PlatformProvider({ children }: { children: React.ReactNode }) {
 
   const logout = useCallback(async () => {
     try {
-      await signOut(auth);
+      const { firebaseAuth, firebaseLib } = await loadFirebaseModules();
+      await firebaseAuth.signOut(firebaseLib.auth);
     } finally {
+      writeAuthHint(false);
       setStoredToken(null);
       setUser(null);
     }

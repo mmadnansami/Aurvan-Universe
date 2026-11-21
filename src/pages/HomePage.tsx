@@ -8,26 +8,47 @@ import { BangladeshMap } from '../components/BangladeshMap';
 import { OFFICIAL_PLATFORM_LOGO_URL } from '../shared/defaultBootstrap';
 import type { PublicCaseSummary, Region } from '../shared/types';
 
+const PUBLIC_CASES_CACHE_KEY = 'aurvan_cache_cases_v1';
+
+function readCachedPublicCases(): PublicCaseSummary[] | null {
+  if (typeof window === 'undefined') return null;
+  try {
+    const raw = window.localStorage.getItem(PUBLIC_CASES_CACHE_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed?.cases) ? parsed.cases : null;
+  } catch {
+    return null;
+  }
+}
+
 export function HomePage() {
   const { bootstrap, user } = usePlatform();
-  const [publishedCases, setPublishedCases] = useState<PublicCaseSummary[]>([]);
-  const [casesLoading, setCasesLoading] = useState(true);
+  const [publishedCases, setPublishedCases] = useState<PublicCaseSummary[]>(
+    () => readCachedPublicCases() ?? []
+  );
+  const [casesLoading, setCasesLoading] = useState(() => readCachedPublicCases() === null);
   const [selectedRegion, setSelectedRegion] = useState<Region | null>(null);
 
   useEffect(() => {
     let active = true;
-    apiFetch<{ cases: PublicCaseSummary[] }>('/api/public/cases')
-      .then((res) => {
-        if (active) setPublishedCases(res.cases);
-      })
-      .catch(() => {
-        if (active) setPublishedCases([]);
-      })
-      .finally(() => {
-        if (active) setCasesLoading(false);
-      });
+    const timer = setTimeout(() => {
+      apiFetch<{ cases: PublicCaseSummary[] }>('/api/public/cases')
+        .then((res) => {
+          if (active) setPublishedCases(res.cases);
+        })
+        .catch(() => {
+          if (active) {
+            setPublishedCases((prev) => (prev.length > 0 ? prev : []));
+          }
+        })
+        .finally(() => {
+          if (active) setCasesLoading(false);
+        });
+    }, 50);
     return () => {
       active = false;
+      clearTimeout(timer);
     };
   }, []);
 
@@ -70,6 +91,8 @@ export function HomePage() {
                 src={hero.media_url}
                 alt="AURVAN UNIVERSE Command Archive"
                 referrerPolicy="no-referrer"
+                decoding="async"
+                fetchPriority="high"
                 className="h-full w-full object-cover opacity-35"
               />
               <div className="absolute inset-0 bg-gradient-to-t from-[#070B13] via-[#070B13]/80 to-[#070B13]/60" />
@@ -119,6 +142,8 @@ export function HomePage() {
                         src={platformLogo}
                         alt="AURVAN UNIVERSE Emblem"
                         referrerPolicy="no-referrer"
+                        decoding="async"
+                        fetchPriority="high"
                         className="mx-auto h-28 w-auto object-contain"
                       />
                     </div>
@@ -428,6 +453,8 @@ export function HomePage() {
                         src={c.cover_image_url}
                         alt={c.title}
                         referrerPolicy="no-referrer"
+                        loading="lazy"
+                        decoding="async"
                         className="h-full w-full object-cover group-hover:scale-105 transition-transform"
                       />
                     </div>
