@@ -1,6 +1,7 @@
 import { Suspense, lazy } from 'react';
 import { BrowserRouter, Route, Routes } from 'react-router-dom';
 import { PlatformProvider, usePlatform } from './context/PlatformContext';
+import { ErrorBoundary } from './components/ErrorBoundary';
 import { Navbar } from './components/Navbar';
 import { Footer } from './components/Footer';
 import { HomePage } from './pages/HomePage';
@@ -70,10 +71,12 @@ function AppShell() {
 
 export default function App() {
   return (
-    <PlatformProvider>
-      <BrowserRouter>
-        <AppShell />
-      </BrowserRouter>
-    </PlatformProvider>
+    <ErrorBoundary>
+      <PlatformProvider>
+        <BrowserRouter>
+          <AppShell />
+        </BrowserRouter>
+      </PlatformProvider>
+    </ErrorBoundary>
   );
 }

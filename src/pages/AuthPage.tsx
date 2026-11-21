@@ -1,22 +1,21 @@
 import { useState } from 'react';
 import { Navigate, useNavigate } from 'react-router-dom';
-import { apiFetch } from '../lib/api';
+import { ShieldCheck } from 'lucide-react';
 import { usePlatform } from '../context/PlatformContext';
 import { OFFICIAL_PLATFORM_LOGO_URL } from '../shared/defaultBootstrap';
 
-type AuthMode = 'login' | 'register' | 'forgot' | 'reset' | 'verify';
+type AuthMode = 'login' | 'register' | 'forgot';
 
 export function AuthPage() {
-  const { user, bootstrap, login, register } = usePlatform();
+  const { user, bootstrap, loginWithGoogle, login, register, sendPasswordReset } = usePlatform();
   const navigate = useNavigate();
 
   const [mode, setMode] = useState<AuthMode>('login');
   const [fullName, setFullName] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
-  const [tokenInput, setTokenInput] = useState('');
-  const [newPassword, setNewPassword] = useState('');
   const [loading, setLoading] = useState(false);
+  const [googleLoading, setGoogleLoading] = useState(false);
   const [error, setError] = useState('');
   const [info, setInfo] = useState('');
 
@@ -25,6 +24,20 @@ export function AuthPage() {
   }
 
   const logoUrl = bootstrap?.settings?.platform_logo_url ?? OFFICIAL_PLATFORM_LOGO_URL;
+
+  const handleGoogleSignIn = async () => {
+    setError('');
+    setInfo('');
+    setGoogleLoading(true);
+    try {
+      const loggedUser = await loginWithGoogle();
+      navigate(loggedUser.role === 'PLAYER' ? '/dashboard' : '/admin', { replace: true });
+    } catch (err: any) {
+      setError(err.message || 'Google sign-in failed.');
+    } finally {
+      setGoogleLoading(false);
+    }
+  };
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -47,14 +60,11 @@ export function AuthPage() {
     setInfo('');
     setLoading(true);
     try {
-      const res = await register(fullName, email, password);
-      if (res.verificationToken) {
-        await apiFetch('/api/auth/verify-email', {
-          method: 'POST',
-          body: JSON.stringify({ token: res.verificationToken }),
-        }).catch(() => undefined);
-      }
-      navigate('/dashboard', { replace: true });
+      await register(fullName, email, password);
+      setInfo(
+        'Account created! Check your email inbox for the verification link, or use "Continue with Google" above for instant verified access.'
+      );
+      setMode('login');
     } catch (err: any) {
       setError(err.message || 'Registration failed.');
     } finally {
@@ -68,59 +78,11 @@ export function AuthPage() {
     setInfo('');
     setLoading(true);
     try {
-      const res = await apiFetch<{ message: string; resetTokenPreview?: string }>('/api/auth/forgot-password', {
-        method: 'POST',
-        body: JSON.stringify({ email }),
-      });
-      setInfo(
-        res.resetTokenPreview
-          ? `${res.message} Token: ${res.resetTokenPreview}`
-          : res.message
-      );
-      if (res.resetTokenPreview) {
-        setTokenInput(res.resetTokenPreview);
-        setMode('reset');
-      }
-    } catch (err: any) {
-      setError(err.message || 'Failed to initiate reset.');
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const handleReset = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setError('');
-    setInfo('');
-    setLoading(true);
-    try {
-      const res = await apiFetch<{ message: string }>('/api/auth/reset-password', {
-        method: 'POST',
-        body: JSON.stringify({ token: tokenInput, newPassword }),
-      });
-      setInfo(res.message);
+      await sendPasswordReset(email);
+      setInfo('Password reset link sent to your email address. Check your inbox or spam folder.');
       setMode('login');
     } catch (err: any) {
-      setError(err.message || 'Password reset failed.');
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const handleVerify = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setError('');
-    setInfo('');
-    setLoading(true);
-    try {
-      const res = await apiFetch<{ message: string }>('/api/auth/verify-email', {
-        method: 'POST',
-        body: JSON.stringify({ token: tokenInput }),
-      });
-      setInfo(res.message);
-      setMode('login');
-    } catch (err: any) {
-      setError(err.message || 'Verification failed.');
+      setError(err.message || 'Failed to send password reset email.');
     } finally {
       setLoading(false);
     }
@@ -146,15 +108,53 @@ export function AuthPage() {
               ? 'Sign In'
               : mode === 'register'
               ? 'Create Investigator Account'
-              : mode === 'forgot'
-              ? 'Forgot Password'
-              : mode === 'reset'
-              ? 'Reset Password'
-              : 'Verify Email'}
+              : 'Forgot Password'}
           </h1>
           <p className="text-xs text-slate-400">
-            Your session remains active in this browser until you explicitly sign out.
+            Powered by Cloud Firestore & Firebase Auth. Your session stays active across browser visits until you sign out.
           </p>
+        </div>
+
+        {error && (
+          <div role="alert" className="rounded-md border border-red-800 bg-red-950/50 px-3.5 py-2.5 text-xs text-red-200 leading-relaxed">
+            {error}
+          </div>
+        )}
+
+        {info && (
+          <div className="rounded-md border border-emerald-800 bg-emerald-950/50 px-3.5 py-2.5 text-xs text-emerald-200 break-words leading-relaxed">
+            {info}
+          </div>
+        )}
+
+        {/* Primary Recommended Instant Cloud Login */}
+        <div className="space-y-2.5">
+          <button
+            type="button"
+            disabled={googleLoading || loading}
+            onClick={handleGoogleSignIn}
+            className="flex w-full items-center justify-center gap-3 rounded-md border border-[#C9A45C]/70 bg-[#C9A45C] px-4 py-3 text-sm font-semibold text-[#070B13] shadow-lg transition hover:bg-[#D8B774] disabled:opacity-50"
+          >
+            <svg className="h-4 w-4 shrink-0" viewBox="0 0 24 24" aria-hidden="true">
+              <path
+                fill="currentColor"
+                d="M21.35 11.1h-9.17v2.73h6.51c-.33 3.81-3.5 5.44-6.5 5.44C8.36 19.27 5 16.25 5 12c0-4.1 3.2-7.27 7.2-7.27c3.09 0 4.9 1.97 4.9 1.97L19 4.72S16.56 2 12.1 2C6.42 2 2.03 6.8 2.03 12c0 5.05 4.13 10 10.22 10c5.35 0 9.25-3.67 9.25-9.09c0-1.15-.15-1.81-.15-1.81Z"
+              />
+            </svg>
+            <span>{googleLoading ? 'Connecting to Google...' : 'Continue with Google'}</span>
+          </button>
+          <p className="flex items-center justify-center gap-1.5 text-[11px] text-slate-400">
+            <ShieldCheck className="h-3.5 w-3.5 text-[#C9A45C] shrink-0" />
+            <span>Recommended instant access for Directorate Admins & Investigators</span>
+          </p>
+        </div>
+
+        <div className="relative flex items-center py-1">
+          <div className="flex-grow border-t border-slate-800" />
+          <span className="mx-3 shrink-0 text-[11px] uppercase tracking-wider text-slate-500">
+            Or Email Credentials
+          </span>
+          <div className="flex-grow border-t border-slate-800" />
         </div>
 
         {/* Mode Switch Tabs */}
@@ -166,7 +166,7 @@ export function AuthPage() {
               setError('');
             }}
             className={`flex-1 rounded py-2 transition-colors ${
-              mode === 'login' ? 'bg-[#C9A45C] text-[#070B13] font-semibold' : 'text-slate-400 hover:text-white'
+              mode === 'login' ? 'bg-slate-800 text-white font-semibold' : 'text-slate-400 hover:text-white'
             }`}
           >
             Sign In
@@ -178,24 +178,12 @@ export function AuthPage() {
               setError('');
             }}
             className={`flex-1 rounded py-2 transition-colors ${
-              mode === 'register' ? 'bg-[#C9A45C] text-[#070B13] font-semibold' : 'text-slate-400 hover:text-white'
+              mode === 'register' ? 'bg-slate-800 text-white font-semibold' : 'text-slate-400 hover:text-white'
             }`}
           >
             Register
           </button>
         </div>
-
-        {error && (
-          <div role="alert" className="rounded-md border border-red-800 bg-red-950/50 px-3.5 py-2.5 text-xs text-red-200">
-            {error}
-          </div>
-        )}
-
-        {info && (
-          <div className="rounded-md border border-emerald-800 bg-emerald-950/50 px-3.5 py-2.5 text-xs text-emerald-200 break-words">
-            {info}
-          </div>
-        )}
 
         {mode === 'login' && (
           <form onSubmit={handleLogin} className="space-y-4">
@@ -233,18 +221,18 @@ export function AuthPage() {
 
             <button
               type="submit"
-              disabled={loading}
-              className="w-full rounded-md bg-[#C9A45C] py-2.5 text-sm font-semibold text-[#070B13] hover:bg-[#D8B774] disabled:opacity-50"
+              disabled={loading || googleLoading}
+              className="w-full rounded-md border border-slate-700 bg-[#070B13] py-2.5 text-sm font-semibold text-slate-200 hover:border-[#C9A45C]/60 hover:text-white disabled:opacity-50"
             >
-              {loading ? 'Signing In...' : 'Sign In'}
+              {loading ? 'Signing In...' : 'Sign In with Email'}
             </button>
 
             <div className="flex items-center justify-between pt-1 text-xs text-slate-400">
               <button type="button" onClick={() => setMode('forgot')} className="hover:text-white">
                 Forgot Password?
               </button>
-              <button type="button" onClick={() => setMode('verify')} className="hover:text-white">
-                Verify Email Token
+              <button type="button" onClick={() => setMode('register')} className="hover:text-white">
+                Need an account?
               </button>
             </div>
           </form>
@@ -305,8 +293,8 @@ export function AuthPage() {
 
             <button
               type="submit"
-              disabled={loading}
-              className="w-full rounded-md bg-[#C9A45C] py-2.5 text-sm font-semibold text-[#070B13] hover:bg-[#D8B774] disabled:opacity-50"
+              disabled={loading || googleLoading}
+              className="w-full rounded-md border border-slate-700 bg-[#070B13] py-2.5 text-sm font-semibold text-slate-200 hover:border-[#C9A45C]/60 hover:text-white disabled:opacity-50"
             >
               {loading ? 'Creating Account...' : 'Create Account'}
             </button>
@@ -325,79 +313,23 @@ export function AuthPage() {
                 required
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
+                placeholder="name@example.com"
                 className="w-full rounded-md border border-slate-700 bg-[#070B13] px-3.5 py-2.5 text-sm text-white focus:border-[#C9A45C] focus:outline-none"
               />
             </div>
             <button
               type="submit"
-              disabled={loading}
-              className="w-full rounded-md bg-[#C9A45C] py-2.5 text-sm font-semibold text-[#070B13] hover:bg-[#D8B774]"
+              disabled={loading || googleLoading}
+              className="w-full rounded-md border border-slate-700 bg-[#070B13] py-2.5 text-sm font-semibold text-slate-200 hover:border-[#C9A45C]/60 hover:text-white disabled:opacity-50"
             >
-              {loading ? 'Generating Token...' : 'Request Password Reset'}
+              {loading ? 'Sending Reset Email...' : 'Send Password Reset Link'}
             </button>
-          </form>
-        )}
-
-        {mode === 'reset' && (
-          <form onSubmit={handleReset} className="space-y-4">
-            <div>
-              <label htmlFor="reset-token" className="block text-xs font-medium text-slate-300 mb-1.5">
-                Reset Token
-              </label>
-              <input
-                id="reset-token"
-                type="text"
-                required
-                value={tokenInput}
-                onChange={(e) => setTokenInput(e.target.value)}
-                className="w-full rounded-md border border-slate-700 bg-[#070B13] px-3.5 py-2.5 text-sm text-white font-mono-tabular focus:border-[#C9A45C] focus:outline-none"
-              />
-            </div>
-            <div>
-              <label htmlFor="reset-pass" className="block text-xs font-medium text-slate-300 mb-1.5">
-                New Password (min. 8 characters)
-              </label>
-              <input
-                id="reset-pass"
-                type="password"
-                required
-                minLength={8}
-                value={newPassword}
-                onChange={(e) => setNewPassword(e.target.value)}
-                className="w-full rounded-md border border-slate-700 bg-[#070B13] px-3.5 py-2.5 text-sm text-white focus:border-[#C9A45C] focus:outline-none"
-              />
-            </div>
             <button
-              type="submit"
-              disabled={loading}
-              className="w-full rounded-md bg-[#C9A45C] py-2.5 text-sm font-semibold text-[#070B13] hover:bg-[#D8B774]"
+              type="button"
+              onClick={() => setMode('login')}
+              className="w-full text-center text-xs text-slate-400 hover:text-white"
             >
-              {loading ? 'Updating Password...' : 'Update Password'}
-            </button>
-          </form>
-        )}
-
-        {mode === 'verify' && (
-          <form onSubmit={handleVerify} className="space-y-4">
-            <div>
-              <label htmlFor="verify-token" className="block text-xs font-medium text-slate-300 mb-1.5">
-                Email Verification Token
-              </label>
-              <input
-                id="verify-token"
-                type="text"
-                required
-                value={tokenInput}
-                onChange={(e) => setTokenInput(e.target.value)}
-                className="w-full rounded-md border border-slate-700 bg-[#070B13] px-3.5 py-2.5 text-sm text-white font-mono-tabular focus:border-[#C9A45C] focus:outline-none"
-              />
-            </div>
-            <button
-              type="submit"
-              disabled={loading}
-              className="w-full rounded-md bg-[#C9A45C] py-2.5 text-sm font-semibold text-[#070B13] hover:bg-[#D8B774]"
-            >
-              Verify Email
+              Back to Sign In
             </button>
           </form>
         )}

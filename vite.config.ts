@@ -34,7 +34,19 @@ export default defineConfig(() => {
       },
     },
     build: {
-      chunkSizeWarningLimit: 750,
+      chunkSizeWarningLimit: 800,
+      rolldownOptions: {
+        output: {
+          manualChunks(id: string) {
+            if (id.includes('node_modules/firebase') || id.includes('node_modules/@firebase')) {
+              return 'firebase-vendor';
+            }
+            if (id.includes('node_modules/three')) {
+              return 'three-vendor';
+            }
+          },
+        },
+      },
     },
     server: {
       // HMR is disabled in AI Studio via DISABLE_HMR env var.

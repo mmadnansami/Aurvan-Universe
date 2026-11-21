@@ -1,3 +1,5 @@
+import { dispatchFirebaseApi } from './firebaseBackend';
+
 const TOKEN_STORAGE_KEY = 'aurvan_session_token';
 
 export function getStoredToken(): string | null {
@@ -31,6 +33,23 @@ export class ApiError extends Error {
 }
 
 export async function apiFetch<T = any>(path: string, options: RequestInit = {}): Promise<T> {
+  if (path.startsWith('/api/')) {
+    try {
+      return await dispatchFirebaseApi<T>(path, options);
+    } catch (err: any) {
+      let message = err?.message || 'Cloud service request failed.';
+      try {
+        const parsed = JSON.parse(message);
+        if (parsed && typeof parsed.error === 'string') {
+          message = parsed.error;
+        }
+      } catch {
+        // Plain error message
+      }
+      throw new ApiError(message, err?.status || 400, err);
+    }
+  }
+
   const token = getStoredToken();
   const headers = new Headers(options.headers || {});
 
@@ -52,13 +71,6 @@ export async function apiFetch<T = any>(path: string, options: RequestInit = {})
   const contentType = response.headers.get('content-type') || '';
   const isJson = contentType.includes('application/json');
   const data = isJson ? await response.json() : await response.text();
-
-  if (path.startsWith('/api/') && !isJson) {
-    throw new ApiError(
-      'Backend API service is unavailable in this deployment environment.',
-      response.status === 200 ? 503 : response.status
-    );
-  }
 
   if (!response.ok) {
     const message =

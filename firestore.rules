@@ -1,0 +1,732 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // Global default-deny safety net
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // ── Global Hardened Primitives ───────────────────────────────────────────
+    function isValidId(id) {
+      return id is string && id.size() >= 1 && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isVerifiedUser() {
+      return isSignedIn() && request.auth.token.email_verified == true;
+    }
+
+    function isOwner(uid) {
+      return isVerifiedUser() && request.auth.uid == uid;
+    }
+
+    function isBootstrapAdmin() {
+      return isVerifiedUser()
+        && request.auth.token.email == 'muttakiadnansami@gmail.com';
+    }
+
+    function isAdmin() {
+      return isVerifiedUser() && (
+        isBootstrapAdmin() ||
+        exists(/databases/$(database)/documents/admins/$(request.auth.uid))
+      );
+    }
+
+    // ── Entity Validation Helpers (Blueprint Synchronicity) ──────────────────
+    function isValidBootstrap(data) {
+      return data.keys().hasAll(['settings', 'content', 'institutions', 'ranks', 'regions', 'updatedAt'])
+        && data.keys().hasOnly(['settings', 'content', 'institutions', 'ranks', 'regions', 'updatedAt'])
+        && data.settings is map
+        && data.content is map
+        && data.institutions is list && data.institutions.size() <= 10
+        && data.ranks is list && data.ranks.size() <= 30
+        && data.regions is list && data.regions.size() <= 20
+        && data.updatedAt == request.time;
+    }
+
+    function isValidAdminMarker(data) {
+      return data.keys().hasAll(['role', 'email', 'grantedAt'])
+        && data.keys().hasOnly(['role', 'email', 'grantedAt'])
+        && data.role in ['ADMIN', 'SUPER_ADMIN']
+        && data.email is string && data.email.size() >= 3 && data.email.size() <= 254
+        && data.grantedAt == request.time;
+    }
+
+    function isValidUserProfile(data, uid) {
+      return data.keys().hasAll([
+          'id', 'full_name', 'player_code', 'role',
+          'institution_id', 'institution_code', 'institution_name',
+          'rank_id', 'rank_title', 'rank_order',
+          'status', 'bio', 'approved_cases_count', 'average_score',
+          'createdAt', 'updatedAt'
+        ])
+        && data.keys().hasOnly([
+          'id', 'full_name', 'player_code', 'role',
+          'institution_id', 'institution_code', 'institution_name',
+          'rank_id', 'rank_title', 'rank_order',
+          'status', 'bio', 'approved_cases_count', 'average_score',
+          'createdAt', 'updatedAt'
+        ])
+        && data.id is string && data.id == uid && data.id.size() <= 128
+        && data.full_name is string && data.full_name.size() >= 2 && data.full_name.size() <= 120
+        && data.player_code is string && data.player_code.size() >= 2 && data.player_code.size() <= 32
+        && data.role in ['PLAYER', 'ADMIN', 'SUPER_ADMIN']
+        && data.institution_id is int && data.institution_id >= 1 && data.institution_id <= 100
+        && data.institution_code in ['AURVAN_POLICE', 'SAB', 'SIA']
+        && data.institution_name is string && data.institution_name.size() >= 2 && data.institution_name.size() <= 120
+        && data.rank_id is int && data.rank_id >= 1 && data.rank_id <= 100
+        && data.rank_title is string && data.rank_title.size() >= 2 && data.rank_title.size() <= 120
+        && data.rank_order is int && data.rank_order >= 1 && data.rank_order <= 10
+        && data.status in ['ACTIVE', 'SUSPENDED']
+        && data.bio is string && data.bio.size() <= 600
+        && data.approved_cases_count is int && data.approved_cases_count >= 0
+        && (data.average_score is int || data.average_score is float) && data.average_score >= 0 && data.average_score <= 100
+        && data.createdAt is timestamp
+        && data.updatedAt == request.time;
+    }
+
+    function isValidPrivateInfo(data) {
+      return data.keys().hasAll(['email', 'email_verified', 'updatedAt'])
+        && data.keys().hasOnly(['email', 'email_verified', 'updatedAt'])
+        && data.email is string && data.email.size() >= 3 && data.email.size() <= 254
+        && data.email_verified is bool
+        && data.updatedAt == request.time;
+    }
+
+    function isValidNotification(data, uid) {
+      return data.keys().hasAll(['id', 'user_id', 'title', 'message', 'is_read', 'createdAt'])
+        && data.keys().hasOnly(['id', 'user_id', 'title', 'message', 'is_read', 'createdAt'])
+        && data.id is string && data.id.size() <= 128
+        && data.user_id is string && data.user_id == uid && data.user_id.size() <= 128
+        && data.title is string && data.title.size() >= 1 && data.title.size() <= 200
+        && data.message is string && data.message.size() >= 1 && data.message.size() <= 2000
+        && data.is_read is bool
+        && data.createdAt is timestamp;
+    }
+
+    function isValidCareerHistory(data, uid) {
+      return data.keys().hasAll([
+          'id', 'user_id', 'from_institution_name', 'to_institution_name',
+          'from_rank_title', 'to_rank_title', 'reason', 'recorded_by', 'createdAt'
+        ])
+        && data.keys().hasOnly([
+          'id', 'user_id', 'from_institution_name', 'to_institution_name',
+          'from_rank_title', 'to_rank_title', 'reason', 'recorded_by', 'createdAt'
+        ])
+        && data.id is string && data.id.size() <= 128
+        && data.user_id is string && data.user_id == uid && data.user_id.size() <= 128
+        && data.from_institution_name is string && data.from_institution_name.size() <= 120
+        && data.to_institution_name is string && data.to_institution_name.size() <= 120
+        && data.from_rank_title is string && data.from_rank_title.size() <= 120
+        && data.to_rank_title is string && data.to_rank_title.size() <= 120
+        && data.reason is string && data.reason.size() <= 500
+        && data.recorded_by is string && data.recorded_by.size() <= 128
+        && data.createdAt == request.time;
+    }
+
+    function isValidCase(data) {
+      return data.keys().hasAll([
+          'id', 'case_code', 'title', 'slug', 'short_description', 'full_story',
+          'institution_id', 'institution_code', 'institution_name', 'region_id', 'region_name',
+          'difficulty', 'estimated_duration', 'status', 'gallery', 'player_tasks',
+          'evaluation_criteria', 'min_rank_order', 'chapters_count', 'evidence_count',
+          'created_by', 'createdAt', 'updatedAt'
+        ])
+        && data.keys().hasOnly([
+          'id', 'case_code', 'title', 'slug', 'short_description', 'full_story',
+          'institution_id', 'institution_code', 'institution_name', 'region_id', 'region_name',
+          'difficulty', 'estimated_duration', 'status',
+          'cover_image_url', 'thumbnail_url',
+          'scene_3d_model_id', 'scene_3d_url', 'scene_3d_format', 'scene_preferred_view',
+          'gallery', 'player_tasks', 'evaluation_criteria',
+          'min_rank_order', 'chapters_count', 'evidence_count',
+          'created_by', 'published_at', 'createdAt', 'updatedAt'
+        ])
+        && data.id is string && data.id.size() <= 128
+        && data.case_code is string && data.case_code.size() >= 2 && data.case_code.size() <= 64
+        && data.title is string && data.title.size() >= 3 && data.title.size() <= 200
+        && data.slug is string && data.slug.size() >= 2 && data.slug.size() <= 240
+        && data.short_description is string && data.short_description.size() <= 1000
+        && data.full_story is string && data.full_story.size() <= 50000
+        && data.institution_id is int
+        && data.institution_code in ['AURVAN_POLICE', 'SAB', 'SIA']
+        && data.institution_name is string && data.institution_name.size() <= 120
+        && data.region_id is int
+        && data.region_name is string && data.region_name.size() <= 120
+        && data.difficulty in ['STANDARD', 'INTERMEDIATE', 'ADVANCED', 'CLASSIFIED']
+        && data.estimated_duration is string && data.estimated_duration.size() <= 80
+        && data.status in ['DRAFT', 'IN_REVIEW', 'READY_TO_PUBLISH', 'PUBLISHED', 'ARCHIVED']
+        && data.gallery is list && data.gallery.size() <= 20 && (data.gallery.size() == 0 || data.gallery[0] is string)
+        && data.player_tasks is list && data.player_tasks.size() <= 30 && (data.player_tasks.size() == 0 || data.player_tasks[0] is string)
+        && data.evaluation_criteria is list && data.evaluation_criteria.size() <= 30 && (data.evaluation_criteria.size() == 0 || data.evaluation_criteria[0] is string)
+        && data.min_rank_order is int && data.min_rank_order >= 1 && data.min_rank_order <= 10
+        && data.chapters_count is int && data.chapters_count >= 0
+        && data.evidence_count is int && data.evidence_count >= 0
+        && data.created_by is string && data.created_by.size() <= 128
+        && (!('cover_image_url' in data) || data.cover_image_url == null || (data.cover_image_url is string && data.cover_image_url.size() <= 800000))
+        && (!('thumbnail_url' in data) || data.thumbnail_url == null || (data.thumbnail_url is string && data.thumbnail_url.size() <= 800000))
+        && (!('scene_3d_model_id' in data) || data.scene_3d_model_id == null || (data.scene_3d_model_id is string && data.scene_3d_model_id.size() <= 128))
+        && (!('scene_3d_url' in data) || data.scene_3d_url == null || (data.scene_3d_url is string && data.scene_3d_url.size() <= 800000))
+        && (!('scene_3d_format' in data) || data.scene_3d_format == null || (data.scene_3d_format is string && data.scene_3d_format.size() <= 16))
+        && (!('scene_preferred_view' in data) || data.scene_preferred_view in ['STANDARD', '3D'])
+        && (!('published_at' in data) || data.published_at == null || (data.published_at is string && data.published_at.size() <= 64))
+        && data.createdAt is timestamp
+        && data.updatedAt == request.time;
+    }
+
+    function isValidChapter(data, caseId) {
+      return data.keys().hasAll(['id', 'case_id', 'case_status', 'chapter_number', 'title', 'briefing_text', 'unlock_condition', 'createdAt'])
+        && data.keys().hasOnly(['id', 'case_id', 'case_status', 'chapter_number', 'title', 'briefing_text', 'unlock_condition', 'createdAt'])
+        && data.id is string && data.id.size() <= 128
+        && data.case_id is string && data.case_id == caseId && data.case_id.size() <= 128
+        && data.case_status in ['DRAFT', 'IN_REVIEW', 'READY_TO_PUBLISH', 'PUBLISHED', 'ARCHIVED']
+        && data.chapter_number is int && data.chapter_number >= 1
+        && data.title is string && data.title.size() >= 1 && data.title.size() <= 200
+        && data.briefing_text is string && data.briefing_text.size() >= 1 && data.briefing_text.size() <= 30000
+        && data.unlock_condition is string && data.unlock_condition.size() <= 120
+        && data.createdAt is timestamp;
+    }
+
+    function isValidEvidence(data, caseId) {
+      return data.keys().hasAll([
+          'id', 'case_id', 'case_status', 'evidence_code', 'title', 'evidence_type', 'description',
+          'chapter_number', 'access_condition', 'related_characters', 'related_evidence',
+          'sort_order', 'is_visible', 'createdAt'
+        ])
+        && data.keys().hasOnly([
+          'id', 'case_id', 'case_status', 'evidence_code', 'title', 'evidence_type', 'description',
+          'image_url', 'document_id', 'audio_id', 'model_3d_id', 'preferred_view',
+          'chapter_number', 'access_condition', 'related_characters', 'related_evidence',
+          'sort_order', 'is_visible', 'createdAt'
+        ])
+        && data.id is string && data.id.size() <= 128
+        && data.case_id is string && data.case_id == caseId && data.case_id.size() <= 128
+        && data.case_status in ['DRAFT', 'IN_REVIEW', 'READY_TO_PUBLISH', 'PUBLISHED', 'ARCHIVED']
+        && data.evidence_code is string && data.evidence_code.size() >= 1 && data.evidence_code.size() <= 64
+        && data.title is string && data.title.size() >= 1 && data.title.size() <= 200
+        && data.evidence_type in ['PHYSICAL', 'DIGITAL', 'DOCUMENT', 'AUDIO', 'PHOTOGRAPH', 'FORENSIC']
+        && data.description is string && data.description.size() <= 15000
+        && (!('image_url' in data) || data.image_url == null || (data.image_url is string && data.image_url.size() <= 800000))
+        && (!('document_id' in data) || data.document_id == null || (data.document_id is string && data.document_id.size() <= 128))
+        && (!('audio_id' in data) || data.audio_id == null || (data.audio_id is string && data.audio_id.size() <= 128))
+        && (!('model_3d_id' in data) || data.model_3d_id == null || (data.model_3d_id is string && data.model_3d_id.size() <= 128))
+        && (!('preferred_view' in data) || data.preferred_view in ['STANDARD', '3D'])
+        && data.chapter_number is int && data.chapter_number >= 1
+        && data.access_condition is string && data.access_condition.size() <= 120
+        && data.related_characters is list && data.related_characters.size() <= 30 && (data.related_characters.size() == 0 || data.related_characters[0] is string)
+        && data.related_evidence is list && data.related_evidence.size() <= 30 && (data.related_evidence.size() == 0 || data.related_evidence[0] is string)
+        && data.sort_order is int && data.sort_order >= 0
+        && data.is_visible is bool
+        && data.createdAt is timestamp;
+    }
+
+    function isValidCharacter(data, caseId) {
+      return data.keys().hasAll([
+          'id', 'case_id', 'case_status', 'name', 'role', 'description',
+          'background', 'relationships', 'is_public', 'createdAt'
+        ])
+        && data.keys().hasOnly([
+          'id', 'case_id', 'case_status', 'name', 'role', 'portrait_url', 'description',
+          'background', 'relationships', 'model_3d_id', 'preferred_view', 'is_public', 'createdAt'
+        ])
+        && data.id is string && data.id.size() <= 128
+        && data.case_id is string && data.case_id == caseId && data.case_id.size() <= 128
+        && data.case_status in ['DRAFT', 'IN_REVIEW', 'READY_TO_PUBLISH', 'PUBLISHED', 'ARCHIVED']
+        && data.name is string && data.name.size() >= 1 && data.name.size() <= 160
+        && data.role is string && data.role.size() >= 1 && data.role.size() <= 160
+        && (!('portrait_url' in data) || data.portrait_url == null || (data.portrait_url is string && data.portrait_url.size() <= 800000))
+        && data.description is string && data.description.size() <= 10000
+        && data.background is string && data.background.size() <= 10000
+        && data.relationships is list && data.relationships.size() <= 30 && (data.relationships.size() == 0 || data.relationships[0] is string)
+        && (!('model_3d_id' in data) || data.model_3d_id == null || (data.model_3d_id is string && data.model_3d_id.size() <= 128))
+        && (!('preferred_view' in data) || data.preferred_view in ['STANDARD', '3D'])
+        && data.is_public is bool
+        && data.createdAt is timestamp;
+    }
+
+    function isValidWitness(data, caseId) {
+      return data.keys().hasAll(['id', 'case_id', 'case_status', 'name', 'role', 'statement_text', 'chapter_number', 'createdAt'])
+        && data.keys().hasOnly(['id', 'case_id', 'case_status', 'name', 'role', 'portrait_url', 'statement_text', 'chapter_number', 'createdAt'])
+        && data.id is string && data.id.size() <= 128
+        && data.case_id is string && data.case_id == caseId && data.case_id.size() <= 128
+        && data.case_status in ['DRAFT', 'IN_REVIEW', 'READY_TO_PUBLISH', 'PUBLISHED', 'ARCHIVED']
+        && data.name is string && data.name.size() >= 1 && data.name.size() <= 160
+        && data.role is string && data.role.size() >= 1 && data.role.size() <= 160
+        && (!('portrait_url' in data) || data.portrait_url == null || (data.portrait_url is string && data.portrait_url.size() <= 800000))
+        && data.statement_text is string && data.statement_text.size() >= 1 && data.statement_text.size() <= 20000
+        && data.chapter_number is int && data.chapter_number >= 1
+        && data.createdAt is timestamp;
+    }
+
+    function isValidInterrogation(data, caseId) {
+      return data.keys().hasAll(['id', 'case_id', 'case_status', 'witness_id', 'question_text', 'response_text', 'follow_up_hint', 'sort_order', 'createdAt'])
+        && data.keys().hasOnly(['id', 'case_id', 'case_status', 'witness_id', 'question_text', 'response_text', 'follow_up_hint', 'sort_order', 'createdAt'])
+        && data.id is string && data.id.size() <= 128
+        && data.case_id is string && data.case_id == caseId && data.case_id.size() <= 128
+        && data.case_status in ['DRAFT', 'IN_REVIEW', 'READY_TO_PUBLISH', 'PUBLISHED', 'ARCHIVED']
+        && data.witness_id is string && data.witness_id.size() >= 1 && data.witness_id.size() <= 128
+        && data.question_text is string && data.question_text.size() >= 1 && data.question_text.size() <= 2000
+        && data.response_text is string && data.response_text.size() >= 1 && data.response_text.size() <= 10000
+        && data.follow_up_hint is string && data.follow_up_hint.size() <= 2000
+        && data.sort_order is int && data.sort_order >= 0
+        && data.createdAt is timestamp;
+    }
+
+    function isValidHint(data, caseId) {
+      return data.keys().hasAll(['id', 'case_id', 'case_status', 'chapter_number', 'hint_order', 'hint_text', 'unlock_condition', 'is_enabled', 'createdAt'])
+        && data.keys().hasOnly(['id', 'case_id', 'case_status', 'chapter_number', 'hint_order', 'hint_text', 'unlock_condition', 'is_enabled', 'createdAt'])
+        && data.id is string && data.id.size() <= 128
+        && data.case_id is string && data.case_id == caseId && data.case_id.size() <= 128
+        && data.case_status in ['DRAFT', 'IN_REVIEW', 'READY_TO_PUBLISH', 'PUBLISHED', 'ARCHIVED']
+        && data.chapter_number is int && data.chapter_number >= 1
+        && data.hint_order is int && data.hint_order >= 1
+        && data.hint_text is string && data.hint_text.size() >= 1 && data.hint_text.size() <= 5000
+        && data.unlock_condition is string && data.unlock_condition.size() <= 120
+        && data.is_enabled is bool
+        && data.createdAt is timestamp;
+    }
+
+    function isValidSolution(data, caseId) {
+      return data.keys().hasAll(['case_id', 'master_solution', 'updatedAt'])
+        && data.keys().hasOnly([
+          'case_id', 'master_solution', 'actual_timeline', 'responsible_character',
+          'evidence_explanations', 'red_herrings', 'critical_clues', 'internal_notes',
+          'private_evidence_notes', 'private_character_notes', 'hidden_interrogation_rules',
+          'updatedAt'
+        ])
+        && data.case_id is string && data.case_id == caseId && data.case_id.size() <= 128
+        && data.master_solution is string && data.master_solution.size() <= 40000
+        && (!('actual_timeline' in data) || (data.actual_timeline is list && data.actual_timeline.size() <= 50))
+        && (!('responsible_character' in data) || (data.responsible_character is string && data.responsible_character.size() <= 200))
+        && (!('evidence_explanations' in data) || (data.evidence_explanations is list && data.evidence_explanations.size() <= 50))
+        && (!('red_herrings' in data) || (data.red_herrings is list && data.red_herrings.size() <= 50))
+        && (!('critical_clues' in data) || (data.critical_clues is list && data.critical_clues.size() <= 50))
+        && (!('internal_notes' in data) || (data.internal_notes is string && data.internal_notes.size() <= 20000))
+        && (!('private_evidence_notes' in data) || data.private_evidence_notes is map)
+        && (!('private_character_notes' in data) || data.private_character_notes is map)
+        && (!('hidden_interrogation_rules' in data) || data.hidden_interrogation_rules is map)
+        && data.updatedAt == request.time;
+    }
+
+    function isValidCaseProgress(data, uid, caseId) {
+      return data.keys().hasAll(['id', 'user_id', 'case_id', 'status', 'current_chapter', 'unlocked_hints', 'asked_questions', 'updatedAt'])
+        && data.keys().hasOnly(['id', 'user_id', 'case_id', 'status', 'current_chapter', 'unlocked_hints', 'asked_questions', 'updatedAt'])
+        && data.id is string && data.id.size() <= 128
+        && data.user_id is string && data.user_id == uid && data.user_id.size() <= 128
+        && data.case_id is string && data.case_id == caseId && data.case_id.size() <= 128
+        && data.status in ['IN_PROGRESS', 'SUBMITTED', 'COMPLETED']
+        && data.current_chapter is int && data.current_chapter >= 1
+        && data.unlocked_hints is list && data.unlocked_hints.size() <= 100
+        && data.asked_questions is list && data.asked_questions.size() <= 100
+        && data.updatedAt == request.time;
+    }
+
+    function isValidCaseNote(data, uid, caseId) {
+      return data.keys().hasAll(['id', 'user_id', 'case_id', 'content', 'updatedAt'])
+        && data.keys().hasOnly(['id', 'user_id', 'case_id', 'content', 'updatedAt'])
+        && data.id is string && data.id.size() <= 128
+        && data.user_id is string && data.user_id == uid && data.user_id.size() <= 128
+        && data.case_id is string && data.case_id == caseId && data.case_id.size() <= 128
+        && data.content is string && data.content.size() <= 50000
+        && data.updatedAt == request.time;
+    }
+
+    function isValidTimelineEntry(data, uid) {
+      return data.keys().hasAll(['id', 'user_id', 'case_id', 'event_time', 'event_title', 'event_notes', 'sort_order', 'createdAt'])
+        && data.keys().hasOnly(['id', 'user_id', 'case_id', 'event_time', 'event_title', 'event_notes', 'sort_order', 'createdAt'])
+        && data.id is string && data.id.size() <= 128
+        && data.user_id is string && data.user_id == uid && data.user_id.size() <= 128
+        && data.case_id is string && data.case_id.size() <= 128
+        && data.event_time is string && data.event_time.size() >= 1 && data.event_time.size() <= 120
+        && data.event_title is string && data.event_title.size() >= 1 && data.event_title.size() <= 240
+        && data.event_notes is string && data.event_notes.size() <= 4000
+        && data.sort_order is int && data.sort_order >= 0
+        && data.createdAt == request.time;
+    }
+
+    function isValidConnection(data, uid) {
+      return data.keys().hasAll(['id', 'user_id', 'case_id', 'source_evidence_id', 'target_evidence_id', 'connection_note', 'createdAt'])
+        && data.keys().hasOnly(['id', 'user_id', 'case_id', 'source_evidence_id', 'target_evidence_id', 'connection_note', 'createdAt'])
+        && data.id is string && data.id.size() <= 128
+        && data.user_id is string && data.user_id == uid && data.user_id.size() <= 128
+        && data.case_id is string && data.case_id.size() <= 128
+        && data.source_evidence_id is string && data.source_evidence_id.size() >= 1 && data.source_evidence_id.size() <= 128
+        && data.target_evidence_id is string && data.target_evidence_id.size() >= 1 && data.target_evidence_id.size() <= 128
+        && data.source_evidence_id != data.target_evidence_id
+        && data.connection_note is string && data.connection_note.size() <= 2000
+        && data.createdAt == request.time;
+    }
+
+    function isValidReport(data) {
+      return data.keys().hasAll([
+          'id', 'user_id', 'player_name', 'player_code', 'case_id', 'case_code', 'case_title',
+          'suspect_identified', 'reasoning_text', 'evidence_references', 'timeline_summary',
+          'status', 'submitted_at', 'createdAt', 'updatedAt'
+        ])
+        && data.keys().hasOnly([
+          'id', 'user_id', 'player_name', 'player_code', 'case_id', 'case_code', 'case_title',
+          'suspect_identified', 'reasoning_text', 'evidence_references', 'timeline_summary',
+          'status', 'score', 'decision', 'feedback', 'career_action', 'evaluated_by',
+          'submitted_at', 'evaluated_at', 'createdAt', 'updatedAt'
+        ])
+        && data.id is string && data.id.size() <= 128
+        && data.user_id is string && data.user_id.size() <= 128
+        && data.player_name is string && data.player_name.size() <= 120
+        && data.player_code is string && data.player_code.size() <= 32
+        && data.case_id is string && data.case_id.size() <= 128
+        && data.case_code is string && data.case_code.size() <= 64
+        && data.case_title is string && data.case_title.size() <= 200
+        && data.suspect_identified is string && data.suspect_identified.size() >= 2 && data.suspect_identified.size() <= 200
+        && data.reasoning_text is string && data.reasoning_text.size() >= 20 && data.reasoning_text.size() <= 30000
+        && data.evidence_references is list && data.evidence_references.size() <= 50 && (data.evidence_references.size() == 0 || data.evidence_references[0] is string)
+        && data.timeline_summary is string && data.timeline_summary.size() <= 10000
+        && data.status in ['SUBMITTED', 'UNDER_REVIEW', 'APPROVED', 'REJECTED']
+        && (!('score' in data) || data.score == null || ((data.score is int || data.score is float) && data.score >= 0 && data.score <= 100))
+        && (!('decision' in data) || data.decision == null || data.decision in ['APPROVED', 'REJECTED'])
+        && (!('feedback' in data) || data.feedback == null || (data.feedback is string && data.feedback.size() <= 10000))
+        && (!('career_action' in data) || data.career_action == null || (data.career_action is string && data.career_action.size() <= 500))
+        && (!('evaluated_by' in data) || data.evaluated_by == null || (data.evaluated_by is string && data.evaluated_by.size() <= 128))
+        && data.submitted_at is string && data.submitted_at.size() <= 64
+        && (!('evaluated_at' in data) || data.evaluated_at == null || (data.evaluated_at is string && data.evaluated_at.size() <= 64))
+        && data.createdAt is timestamp
+        && data.updatedAt == request.time;
+    }
+
+    function isValidMediaAsset(data) {
+      return data.keys().hasAll(['id', 'title', 'file_name', 'folder', 'mime_type', 'size_bytes', 'url', 'source_type', 'is_public', 'uploaded_by', 'createdAt'])
+        && data.keys().hasOnly(['id', 'title', 'file_name', 'folder', 'mime_type', 'size_bytes', 'url', 'source_type', 'model_3d_id', 'preferred_view', 'is_public', 'uploaded_by', 'createdAt'])
+        && data.id is string && data.id.size() <= 128
+        && data.title is string && data.title.size() >= 1 && data.title.size() <= 200
+        && data.file_name is string && data.file_name.size() <= 240
+        && data.folder is string && data.folder.size() <= 80
+        && data.mime_type is string && data.mime_type.size() <= 80
+        && data.size_bytes is int && data.size_bytes >= 0
+        && data.url is string && data.url.size() >= 1 && data.url.size() <= 800000
+        && data.source_type is string && data.source_type.size() <= 40
+        && (!('model_3d_id' in data) || data.model_3d_id == null || (data.model_3d_id is string && data.model_3d_id.size() <= 128))
+        && (!('preferred_view' in data) || data.preferred_view in ['STANDARD', '3D'])
+        && data.is_public is bool
+        && data.uploaded_by is string && data.uploaded_by.size() <= 128
+        && data.createdAt is timestamp;
+    }
+
+    function isValidDocumentAsset(data) {
+      return data.keys().hasAll(['id', 'title', 'file_name', 'mime_type', 'size_bytes', 'data_url', 'is_confidential', 'uploaded_by', 'createdAt'])
+        && data.keys().hasOnly(['id', 'title', 'file_name', 'mime_type', 'size_bytes', 'data_url', 'is_confidential', 'case_id', 'model_3d_id', 'preferred_view', 'uploaded_by', 'createdAt'])
+        && data.id is string && data.id.size() <= 128
+        && data.title is string && data.title.size() >= 1 && data.title.size() <= 200
+        && data.file_name is string && data.file_name.size() <= 240
+        && data.mime_type is string && data.mime_type.size() <= 80
+        && data.size_bytes is int && data.size_bytes >= 0
+        && data.data_url is string && data.data_url.size() >= 1 && data.data_url.size() <= 800000
+        && data.is_confidential is bool
+        && (!('case_id' in data) || data.case_id == null || (data.case_id is string && data.case_id.size() <= 128))
+        && (!('model_3d_id' in data) || data.model_3d_id == null || (data.model_3d_id is string && data.model_3d_id.size() <= 128))
+        && (!('preferred_view' in data) || data.preferred_view in ['STANDARD', '3D'])
+        && data.uploaded_by is string && data.uploaded_by.size() <= 128
+        && data.createdAt is timestamp;
+    }
+
+    function isValidAudioAsset(data) {
+      return data.keys().hasAll(['id', 'title', 'file_name', 'mime_type', 'size_bytes', 'url', 'chapter_number', 'is_public', 'uploaded_by', 'createdAt'])
+        && data.keys().hasOnly(['id', 'title', 'description', 'transcript', 'file_name', 'mime_type', 'size_bytes', 'url', 'case_id', 'chapter_number', 'is_public', 'uploaded_by', 'createdAt'])
+        && data.id is string && data.id.size() <= 128
+        && data.title is string && data.title.size() >= 1 && data.title.size() <= 200
+        && (!('description' in data) || (data.description is string && data.description.size() <= 5000))
+        && (!('transcript' in data) || (data.transcript is string && data.transcript.size() <= 30000))
+        && data.file_name is string && data.file_name.size() <= 240
+        && data.mime_type is string && data.mime_type.size() <= 80
+        && data.size_bytes is int && data.size_bytes >= 0
+        && data.url is string && data.url.size() >= 1 && data.url.size() <= 800000
+        && (!('case_id' in data) || data.case_id == null || (data.case_id is string && data.case_id.size() <= 128))
+        && data.chapter_number is int && data.chapter_number >= 1
+        && data.is_public is bool
+        && data.uploaded_by is string && data.uploaded_by.size() <= 128
+        && data.createdAt is timestamp;
+    }
+
+    function isValidModel3DAsset(data) {
+      return data.keys().hasAll(['id', 'title', 'file_name', 'format', 'mime_type', 'size_bytes', 'url', 'source_type', 'provider', 'progress', 'status', 'is_public', 'uploaded_by', 'createdAt', 'updatedAt'])
+        && data.keys().hasOnly(['id', 'title', 'file_name', 'format', 'mime_type', 'size_bytes', 'url', 'source_type', 'source_image_url', 'linked_entity_type', 'linked_entity_id', 'provider', 'external_task_id', 'progress', 'status', 'error_message', 'is_public', 'uploaded_by', 'createdAt', 'updatedAt'])
+        && data.id is string && data.id.size() <= 128
+        && data.title is string && data.title.size() >= 1 && data.title.size() <= 200
+        && data.file_name is string && data.file_name.size() <= 240
+        && data.format in ['GLB', 'GLTF']
+        && data.mime_type is string && data.mime_type.size() <= 100
+        && data.size_bytes is int && data.size_bytes >= 0
+        && data.url is string && data.url.size() <= 800000
+        && data.source_type in ['UPLOAD', 'AI_CONVERSION']
+        && (!('source_image_url' in data) || data.source_image_url == null || (data.source_image_url is string && data.source_image_url.size() <= 800000))
+        && (!('linked_entity_type' in data) || data.linked_entity_type == null || (data.linked_entity_type is string && data.linked_entity_type.size() <= 32))
+        && (!('linked_entity_id' in data) || data.linked_entity_id == null || (data.linked_entity_id is string && data.linked_entity_id.size() <= 128))
+        && data.provider is string && data.provider.size() <= 80
+        && (!('external_task_id' in data) || data.external_task_id == null || (data.external_task_id is string && data.external_task_id.size() <= 128))
+        && data.progress is int && data.progress >= 0 && data.progress <= 100
+        && data.status in ['QUEUED', 'PROCESSING', 'READY', 'FAILED']
+        && (!('error_message' in data) || (data.error_message is string && data.error_message.size() <= 2000))
+        && data.is_public is bool
+        && data.uploaded_by is string && data.uploaded_by.size() <= 128
+        && data.createdAt is timestamp
+        && data.updatedAt == request.time;
+    }
+
+    function isValidAdminLog(data) {
+      return data.keys().hasAll(['id', 'actor_id', 'actor_email', 'action', 'target_type', 'target_id', 'summary', 'createdAt'])
+        && data.keys().hasOnly(['id', 'actor_id', 'actor_email', 'action', 'target_type', 'target_id', 'summary', 'createdAt'])
+        && data.id is string && data.id.size() <= 128
+        && data.actor_id is string && data.actor_id == request.auth.uid && data.actor_id.size() <= 128
+        && data.actor_email is string && data.actor_email.size() <= 254
+        && data.action is string && data.action.size() <= 80
+        && data.target_type is string && data.target_type.size() <= 80
+        && data.target_id is string && data.target_id.size() <= 128
+        && data.summary is string && data.summary.size() <= 1000
+        && data.createdAt == request.time;
+    }
+
+    // ── Collection Match Rules ───────────────────────────────────────────────
+
+    match /test/connection {
+      allow get: if true;
+    }
+
+    match /platform/bootstrap {
+      allow get: if true;
+      allow create, update: if isAdmin() && isValidBootstrap(incoming());
+    }
+
+    match /admins/{uid} {
+      allow get: if isValidId(uid) && (isOwner(uid) || isAdmin());
+      allow create: if isValidId(uid) && isValidAdminMarker(incoming()) && (
+        (isBootstrapAdmin() && request.auth.uid == uid) || isAdmin()
+      );
+      allow update: if isValidId(uid) && isAdmin() && isValidAdminMarker(incoming());
+      allow delete: if isValidId(uid) && isAdmin() && uid != request.auth.uid;
+    }
+
+    match /users/{uid} {
+      allow get: if isValidId(uid) && (isOwner(uid) || isAdmin());
+      allow list: if isAdmin() || existing().approved_cases_count > 0;
+      allow create: if isValidId(uid) && isValidUserProfile(incoming(), uid) && (
+        (
+          isOwner(uid)
+          && incoming().createdAt == request.time
+          && incoming().status == 'ACTIVE'
+          && incoming().institution_id == 1
+          && incoming().rank_id == 1
+          && incoming().approved_cases_count == 0
+          && incoming().average_score == 0
+          && (
+            incoming().role == 'PLAYER' ||
+            (isBootstrapAdmin() && incoming().role == 'SUPER_ADMIN')
+          )
+        ) || isAdmin()
+      );
+      allow update: if isValidId(uid)
+        && isValidUserProfile(incoming(), uid)
+        && incoming().id == existing().id
+        && incoming().createdAt == existing().createdAt
+        && (
+          isAdmin() ||
+          (isOwner(uid) && incoming().diff(existing()).affectedKeys().hasOnly(['full_name', 'bio', 'updatedAt']))
+        );
+
+      match /private/{docId} {
+        allow get: if isValidId(uid) && isValidId(docId) && (isOwner(uid) || isAdmin());
+        allow create, update: if isValidId(uid) && isValidId(docId)
+          && isValidPrivateInfo(incoming())
+          && (
+            (isOwner(uid) && incoming().email == request.auth.token.email && incoming().email_verified == true) ||
+            isAdmin()
+          );
+      }
+
+      match /notifications/{notifId} {
+        allow get: if isValidId(uid) && isValidId(notifId) && (isOwner(uid) || isAdmin());
+        allow list: if isOwner(uid) || isAdmin();
+        allow create: if isValidId(uid) && isValidId(notifId)
+          && isValidNotification(incoming(), uid)
+          && incoming().createdAt == request.time
+          && (isOwner(uid) || isAdmin());
+        allow update: if isValidId(uid) && isValidId(notifId)
+          && isValidNotification(incoming(), uid)
+          && incoming().createdAt == existing().createdAt
+          && (
+            isAdmin() ||
+            (isOwner(uid) && incoming().diff(existing()).affectedKeys().hasOnly(['is_read']))
+          );
+        allow delete: if isValidId(uid) && isValidId(notifId) && isAdmin();
+      }
+
+      match /careerHistory/{entryId} {
+        allow get: if isValidId(uid) && isValidId(entryId) && (isOwner(uid) || isAdmin());
+        allow list: if isOwner(uid) || isAdmin();
+        allow create: if isValidId(uid) && isValidId(entryId) && isAdmin() && isValidCareerHistory(incoming(), uid);
+      }
+
+      match /caseProgress/{caseId} {
+        allow get: if isValidId(uid) && isValidId(caseId) && (isOwner(uid) || isAdmin());
+        allow list: if isOwner(uid) || isAdmin();
+        allow create, update: if isValidId(uid) && isValidId(caseId)
+          && isValidCaseProgress(incoming(), uid, caseId)
+          && (isOwner(uid) || isAdmin());
+      }
+
+      match /caseNotes/{caseId} {
+        allow get: if isValidId(uid) && isValidId(caseId) && (isOwner(uid) || isAdmin());
+        allow list: if isOwner(uid) || isAdmin();
+        allow create, update: if isValidId(uid) && isValidId(caseId)
+          && isValidCaseNote(incoming(), uid, caseId)
+          && (isOwner(uid) || isAdmin());
+      }
+
+      match /timeline/{itemId} {
+        allow get: if isValidId(uid) && isValidId(itemId) && (isOwner(uid) || isAdmin());
+        allow list: if isOwner(uid) || isAdmin();
+        allow create: if isValidId(uid) && isValidId(itemId)
+          && isValidTimelineEntry(incoming(), uid)
+          && (isOwner(uid) || isAdmin());
+        allow delete: if isValidId(uid) && isValidId(itemId) && (isOwner(uid) || isAdmin());
+      }
+
+      match /connections/{connId} {
+        allow get: if isValidId(uid) && isValidId(connId) && (isOwner(uid) || isAdmin());
+        allow list: if isOwner(uid) || isAdmin();
+        allow create: if isValidId(uid) && isValidId(connId)
+          && isValidConnection(incoming(), uid)
+          && (isOwner(uid) || isAdmin());
+        allow delete: if isValidId(uid) && isValidId(connId) && (isOwner(uid) || isAdmin());
+      }
+    }
+
+    match /cases/{caseId} {
+      allow get: if isValidId(caseId) && (existing().status == 'PUBLISHED' || isAdmin());
+      allow list: if existing().status == 'PUBLISHED' || isAdmin();
+      allow create: if isValidId(caseId) && isAdmin() && isValidCase(incoming()) && incoming().createdAt == request.time;
+      allow update: if isValidId(caseId) && isAdmin() && isValidCase(incoming()) && incoming().createdAt == existing().createdAt;
+      allow delete: if isValidId(caseId) && isAdmin();
+
+      match /chapters/{chapterId} {
+        allow get: if isValidId(caseId) && isValidId(chapterId) && (existing().case_status == 'PUBLISHED' || isAdmin());
+        allow list: if existing().case_status == 'PUBLISHED' || isAdmin();
+        allow create: if isValidId(caseId) && isValidId(chapterId) && isAdmin() && isValidChapter(incoming(), caseId) && incoming().createdAt == request.time;
+        allow update: if isValidId(caseId) && isValidId(chapterId) && isAdmin() && isValidChapter(incoming(), caseId) && incoming().createdAt == existing().createdAt;
+        allow delete: if isValidId(caseId) && isValidId(chapterId) && isAdmin();
+      }
+
+      match /evidence/{evidenceId} {
+        allow get: if isValidId(caseId) && isValidId(evidenceId) && (existing().case_status == 'PUBLISHED' || isAdmin());
+        allow list: if existing().case_status == 'PUBLISHED' || isAdmin();
+        allow create: if isValidId(caseId) && isValidId(evidenceId) && isAdmin() && isValidEvidence(incoming(), caseId) && incoming().createdAt == request.time;
+        allow update: if isValidId(caseId) && isValidId(evidenceId) && isAdmin() && isValidEvidence(incoming(), caseId) && incoming().createdAt == existing().createdAt;
+        allow delete: if isValidId(caseId) && isValidId(evidenceId) && isAdmin();
+      }
+
+      match /characters/{charId} {
+        allow get: if isValidId(caseId) && isValidId(charId) && ((existing().case_status == 'PUBLISHED' && existing().is_public == true) || isAdmin());
+        allow list: if (existing().case_status == 'PUBLISHED' && existing().is_public == true) || isAdmin();
+        allow create: if isValidId(caseId) && isValidId(charId) && isAdmin() && isValidCharacter(incoming(), caseId) && incoming().createdAt == request.time;
+        allow update: if isValidId(caseId) && isValidId(charId) && isAdmin() && isValidCharacter(incoming(), caseId) && incoming().createdAt == existing().createdAt;
+        allow delete: if isValidId(caseId) && isValidId(charId) && isAdmin();
+      }
+
+      match /witnesses/{witnessId} {
+        allow get: if isValidId(caseId) && isValidId(witnessId) && (existing().case_status == 'PUBLISHED' || isAdmin());
+        allow list: if existing().case_status == 'PUBLISHED' || isAdmin();
+        allow create: if isValidId(caseId) && isValidId(witnessId) && isAdmin() && isValidWitness(incoming(), caseId) && incoming().createdAt == request.time;
+        allow update: if isValidId(caseId) && isValidId(witnessId) && isAdmin() && isValidWitness(incoming(), caseId) && incoming().createdAt == existing().createdAt;
+        allow delete: if isValidId(caseId) && isValidId(witnessId) && isAdmin();
+      }
+
+      match /interrogations/{questionId} {
+        allow get: if isValidId(caseId) && isValidId(questionId) && (existing().case_status == 'PUBLISHED' || isAdmin());
+        allow list: if existing().case_status == 'PUBLISHED' || isAdmin();
+        allow create: if isValidId(caseId) && isValidId(questionId) && isAdmin() && isValidInterrogation(incoming(), caseId) && incoming().createdAt == request.time;
+        allow update: if isValidId(caseId) && isValidId(questionId) && isAdmin() && isValidInterrogation(incoming(), caseId) && incoming().createdAt == existing().createdAt;
+        allow delete: if isValidId(caseId) && isValidId(questionId) && isAdmin();
+      }
+
+      match /hints/{hintId} {
+        allow get: if isValidId(caseId) && isValidId(hintId) && ((existing().case_status == 'PUBLISHED' && existing().is_enabled == true) || isAdmin());
+        allow list: if (existing().case_status == 'PUBLISHED' && existing().is_enabled == true) || isAdmin();
+        allow create: if isValidId(caseId) && isValidId(hintId) && isAdmin() && isValidHint(incoming(), caseId) && incoming().createdAt == request.time;
+        allow update: if isValidId(caseId) && isValidId(hintId) && isAdmin() && isValidHint(incoming(), caseId) && incoming().createdAt == existing().createdAt;
+        allow delete: if isValidId(caseId) && isValidId(hintId) && isAdmin();
+      }
+    }
+
+    match /caseSolutions/{caseId} {
+      allow get: if isValidId(caseId) && isAdmin();
+      allow create, update: if isValidId(caseId) && isAdmin() && isValidSolution(incoming(), caseId);
+      allow delete: if isValidId(caseId) && isAdmin();
+    }
+
+    match /reports/{reportId} {
+      allow get: if isValidId(reportId) && (isAdmin() || (isVerifiedUser() && existing().user_id == request.auth.uid));
+      allow list: if isAdmin() || (isVerifiedUser() && existing().user_id == request.auth.uid);
+      allow create: if isValidId(reportId)
+        && isVerifiedUser()
+        && isValidReport(incoming())
+        && incoming().user_id == request.auth.uid
+        && incoming().status == 'SUBMITTED'
+        && incoming().createdAt == request.time
+        && exists(/databases/$(database)/documents/cases/$(incoming().case_id));
+      allow update: if isValidId(reportId)
+        && isAdmin()
+        && isValidReport(incoming())
+        && incoming().user_id == existing().user_id
+        && incoming().case_id == existing().case_id
+        && incoming().createdAt == existing().createdAt;
+      allow delete: if isValidId(reportId) && isAdmin();
+    }
+
+    match /mediaAssets/{assetId} {
+      allow get: if isValidId(assetId) && (isAdmin() || (isVerifiedUser() && existing().is_public == true));
+      allow list: if isAdmin() || (isVerifiedUser() && existing().is_public == true);
+      allow create: if isValidId(assetId) && isAdmin() && isValidMediaAsset(incoming()) && incoming().createdAt == request.time;
+      allow update: if isValidId(assetId) && isAdmin() && isValidMediaAsset(incoming()) && incoming().createdAt == existing().createdAt;
+      allow delete: if isValidId(assetId) && isAdmin();
+    }
+
+    match /documents/{docId} {
+      allow get: if isValidId(docId) && (isAdmin() || (isVerifiedUser() && existing().is_confidential == false));
+      allow list: if isAdmin() || (isVerifiedUser() && existing().is_confidential == false);
+      allow create: if isValidId(docId) && isAdmin() && isValidDocumentAsset(incoming()) && incoming().createdAt == request.time;
+      allow update: if isValidId(docId) && isAdmin() && isValidDocumentAsset(incoming()) && incoming().createdAt == existing().createdAt;
+      allow delete: if isValidId(docId) && isAdmin();
+    }
+
+    match /audioAssets/{audioId} {
+      allow get: if isValidId(audioId) && (isAdmin() || (isVerifiedUser() && existing().is_public == true));
+      allow list: if isAdmin() || (isVerifiedUser() && existing().is_public == true);
+      allow create: if isValidId(audioId) && isAdmin() && isValidAudioAsset(incoming()) && incoming().createdAt == request.time;
+      allow update: if isValidId(audioId) && isAdmin() && isValidAudioAsset(incoming()) && incoming().createdAt == existing().createdAt;
+      allow delete: if isValidId(audioId) && isAdmin();
+    }
+
+    match /models3d/{modelId} {
+      allow get: if isValidId(modelId) && (isAdmin() || (isVerifiedUser() && existing().is_public == true));
+      allow list: if isAdmin() || (isVerifiedUser() && existing().is_public == true);
+      allow create: if isValidId(modelId) && isAdmin() && isValidModel3DAsset(incoming()) && incoming().createdAt == request.time;
+      allow update: if isValidId(modelId) && isAdmin() && isValidModel3DAsset(incoming()) && incoming().createdAt == existing().createdAt;
+      allow delete: if isValidId(modelId) && isAdmin();
+    }
+
+    match /adminLogs/{logId} {
+      allow get: if isValidId(logId) && isAdmin();
+      allow list: if isAdmin();
+      allow create: if isValidId(logId) && isAdmin() && isValidAdminLog(incoming());
+    }
+  }
+}

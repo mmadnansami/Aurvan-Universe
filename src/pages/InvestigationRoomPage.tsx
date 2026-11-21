@@ -17,7 +17,8 @@ import {
   Clock,
   X,
 } from 'lucide-react';
-import { apiFetch, getStoredToken } from '../lib/api';
+import { apiFetch } from '../lib/api';
+import { getFirestoreDocumentData } from '../lib/firebaseBackend';
 import { usePlatform } from '../context/PlatformContext';
 import { Model3DViewer } from '../components/Model3DViewer';
 
@@ -210,23 +211,18 @@ export function InvestigationRoomPage() {
   };
 
   const handleOpenDocument = async (docId: string, title: string, mime: string) => {
-    const token = getStoredToken();
-    const res = await fetch(`/api/player/documents/${docId}/file`, {
-      headers: token ? { Authorization: `Bearer ${token}` } : {},
-      credentials: 'include',
-    });
-    if (!res.ok) return;
-    if (mime === 'text/plain') {
-      const txt = await res.text();
-      setDocPreview({ title, text: txt });
-    } else {
-      const blob = await res.blob();
-      const url = URL.createObjectURL(blob);
-      const link = document.createElement('a');
-      link.href = url;
-      link.download = title;
-      link.click();
-      URL.revokeObjectURL(url);
+    try {
+      const docData = await getFirestoreDocumentData(docId);
+      if ((mime === 'text/plain' || docData.mimeType === 'text/plain') && docData.textContent !== null) {
+        setDocPreview({ title, text: docData.textContent });
+      } else {
+        const link = document.createElement('a');
+        link.href = docData.dataUrl;
+        link.download = docData.fileName || title;
+        link.click();
+      }
+    } catch (err: any) {
+      setError(err.message || 'Unable to open document.');
     }
   };
 

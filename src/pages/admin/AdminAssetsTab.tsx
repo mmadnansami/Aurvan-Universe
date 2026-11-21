@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { Box, FileText, Trash2, Upload, Volume2 } from 'lucide-react';
-import { apiFetch, getStoredToken } from '../../lib/api';
+import { apiFetch } from '../../lib/api';
+import { downloadFirestoreDocument } from '../../lib/firebaseBackend';
 import { ConfirmDialog } from '../../components/ConfirmDialog';
 import { Evidence3DStudioModal, type StudioTargetAsset } from '../../components/Evidence3DStudioModal';
 import { parsePositiveInt, sanitizeDigitInput } from '../../shared/numericInput';
@@ -99,19 +100,11 @@ export function AdminAssetsTab({ mode }: { mode: 'documents' | 'audio' }) {
   };
 
   const handlePreviewDoc = async (doc: DocumentAsset) => {
-    const token = getStoredToken();
-    const res = await fetch(`/api/admin/documents/${doc.id}/preview`, {
-      headers: token ? { Authorization: `Bearer ${token}` } : {},
-      credentials: 'include',
-    });
-    if (!res.ok) return;
-    const blob = await res.blob();
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = doc.file_name;
-    a.click();
-    URL.revokeObjectURL(url);
+    try {
+      await downloadFirestoreDocument(doc.id);
+    } catch (err: any) {
+      setError(err.message || 'Unable to download document.');
+    }
   };
 
   const handleDeleteConfirm = async () => {

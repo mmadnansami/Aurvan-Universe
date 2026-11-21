@@ -1,0 +1,702 @@
+{
+  "entities": {
+    "ConnectionProbe": {
+      "title": "ConnectionProbe",
+      "description": "Startup Firestore connectivity verification document",
+      "type": "object",
+      "properties": {
+        "ok": { "type": "boolean" }
+      }
+    },
+    "PlatformBootstrap": {
+      "title": "PlatformBootstrap",
+      "description": "Public platform branding, site content, institutions, ranks, and eight Bangladesh divisions",
+      "type": "object",
+      "properties": {
+        "settings": { "type": "object" },
+        "content": { "type": "object" },
+        "institutions": { "type": "array" },
+        "ranks": { "type": "array" },
+        "regions": { "type": "array" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["settings", "content", "institutions", "ranks", "regions", "updatedAt"]
+    },
+    "AdminMarker": {
+      "title": "AdminMarker",
+      "description": "Trusted Directorate admin privilege marker keyed by Firebase Auth UID",
+      "type": "object",
+      "properties": {
+        "role": { "type": "string", "enum": ["ADMIN", "SUPER_ADMIN"] },
+        "email": { "type": "string", "maxLength": 254 },
+        "grantedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["role", "email", "grantedAt"]
+    },
+    "UserProfile": {
+      "title": "UserProfile",
+      "description": "Operational investigator profile without PII (email isolated in private subcollection)",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "full_name": { "type": "string", "minLength": 2, "maxLength": 120 },
+        "player_code": { "type": "string", "maxLength": 32 },
+        "role": { "type": "string", "enum": ["PLAYER", "ADMIN", "SUPER_ADMIN"] },
+        "institution_id": { "type": "integer" },
+        "institution_code": { "type": "string", "enum": ["AURVAN_POLICE", "SAB", "SIA"] },
+        "institution_name": { "type": "string", "maxLength": 120 },
+        "rank_id": { "type": "integer" },
+        "rank_title": { "type": "string", "maxLength": 120 },
+        "rank_order": { "type": "integer" },
+        "status": { "type": "string", "enum": ["ACTIVE", "SUSPENDED"] },
+        "bio": { "type": "string", "maxLength": 600 },
+        "approved_cases_count": { "type": "integer" },
+        "average_score": { "type": "number" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": [
+        "id",
+        "full_name",
+        "player_code",
+        "role",
+        "institution_id",
+        "institution_code",
+        "institution_name",
+        "rank_id",
+        "rank_title",
+        "rank_order",
+        "status",
+        "bio",
+        "approved_cases_count",
+        "average_score",
+        "createdAt",
+        "updatedAt"
+      ]
+    },
+    "UserPrivateInfo": {
+      "title": "UserPrivateInfo",
+      "description": "PII-isolated private account metadata for an investigator",
+      "type": "object",
+      "properties": {
+        "email": { "type": "string", "maxLength": 254 },
+        "email_verified": { "type": "boolean" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["email", "email_verified", "updatedAt"]
+    },
+    "NotificationItem": {
+      "title": "NotificationItem",
+      "description": "Investigator notification item",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128 },
+        "user_id": { "type": "string", "maxLength": 128 },
+        "title": { "type": "string", "maxLength": 200 },
+        "message": { "type": "string", "maxLength": 2000 },
+        "is_read": { "type": "boolean" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "user_id", "title", "message", "is_read", "createdAt"]
+    },
+    "CareerHistoryEntry": {
+      "title": "CareerHistoryEntry",
+      "description": "Official institutional transfer or rank advancement log entry",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128 },
+        "user_id": { "type": "string", "maxLength": 128 },
+        "from_institution_name": { "type": "string", "maxLength": 120 },
+        "to_institution_name": { "type": "string", "maxLength": 120 },
+        "from_rank_title": { "type": "string", "maxLength": 120 },
+        "to_rank_title": { "type": "string", "maxLength": 120 },
+        "reason": { "type": "string", "maxLength": 500 },
+        "recorded_by": { "type": "string", "maxLength": 128 },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": [
+        "id",
+        "user_id",
+        "from_institution_name",
+        "to_institution_name",
+        "from_rank_title",
+        "to_rank_title",
+        "reason",
+        "recorded_by",
+        "createdAt"
+      ]
+    },
+    "CaseDossier": {
+      "title": "CaseDossier",
+      "description": "Investigation case metadata (drafts hidden from non-admins; solutions stored separately)",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128 },
+        "case_code": { "type": "string", "maxLength": 64 },
+        "title": { "type": "string", "maxLength": 200 },
+        "slug": { "type": "string", "maxLength": 240 },
+        "short_description": { "type": "string", "maxLength": 1000 },
+        "full_story": { "type": "string", "maxLength": 50000 },
+        "institution_id": { "type": "integer" },
+        "institution_code": { "type": "string", "enum": ["AURVAN_POLICE", "SAB", "SIA"] },
+        "institution_name": { "type": "string", "maxLength": 120 },
+        "region_id": { "type": "integer" },
+        "region_name": { "type": "string", "maxLength": 120 },
+        "difficulty": { "type": "string", "enum": ["STANDARD", "INTERMEDIATE", "ADVANCED", "CLASSIFIED"] },
+        "estimated_duration": { "type": "string", "maxLength": 80 },
+        "status": { "type": "string", "enum": ["DRAFT", "IN_REVIEW", "READY_TO_PUBLISH", "PUBLISHED", "ARCHIVED"] },
+        "cover_image_url": { "type": "string", "maxLength": 800000 },
+        "thumbnail_url": { "type": "string", "maxLength": 800000 },
+        "scene_3d_model_id": { "type": "string", "maxLength": 128 },
+        "scene_3d_url": { "type": "string", "maxLength": 800000 },
+        "scene_3d_format": { "type": "string", "maxLength": 16 },
+        "scene_preferred_view": { "type": "string", "enum": ["STANDARD", "3D"] },
+        "gallery": { "type": "array" },
+        "player_tasks": { "type": "array" },
+        "evaluation_criteria": { "type": "array" },
+        "min_rank_order": { "type": "integer" },
+        "chapters_count": { "type": "integer" },
+        "evidence_count": { "type": "integer" },
+        "created_by": { "type": "string", "maxLength": 128 },
+        "published_at": { "type": "string", "maxLength": 64 },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": [
+        "id",
+        "case_code",
+        "title",
+        "slug",
+        "short_description",
+        "full_story",
+        "institution_id",
+        "institution_code",
+        "institution_name",
+        "region_id",
+        "region_name",
+        "difficulty",
+        "estimated_duration",
+        "status",
+        "gallery",
+        "player_tasks",
+        "evaluation_criteria",
+        "min_rank_order",
+        "chapters_count",
+        "evidence_count",
+        "created_by",
+        "createdAt",
+        "updatedAt"
+      ]
+    },
+    "CaseChapter": {
+      "title": "CaseChapter",
+      "description": "Ordered narrative briefing chapter under a case",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128 },
+        "case_id": { "type": "string", "maxLength": 128 },
+        "case_status": { "type": "string", "maxLength": 32 },
+        "chapter_number": { "type": "integer" },
+        "title": { "type": "string", "maxLength": 200 },
+        "briefing_text": { "type": "string", "maxLength": 30000 },
+        "unlock_condition": { "type": "string", "maxLength": 120 },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "case_id", "case_status", "chapter_number", "title", "briefing_text", "unlock_condition", "createdAt"]
+    },
+    "CaseEvidence": {
+      "title": "CaseEvidence",
+      "description": "Public player-visible evidence item under a case",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128 },
+        "case_id": { "type": "string", "maxLength": 128 },
+        "case_status": { "type": "string", "maxLength": 32 },
+        "evidence_code": { "type": "string", "maxLength": 64 },
+        "title": { "type": "string", "maxLength": 200 },
+        "evidence_type": { "type": "string", "maxLength": 32 },
+        "description": { "type": "string", "maxLength": 15000 },
+        "image_url": { "type": "string", "maxLength": 800000 },
+        "document_id": { "type": "string", "maxLength": 128 },
+        "audio_id": { "type": "string", "maxLength": 128 },
+        "model_3d_id": { "type": "string", "maxLength": 128 },
+        "preferred_view": { "type": "string", "enum": ["STANDARD", "3D"] },
+        "chapter_number": { "type": "integer" },
+        "access_condition": { "type": "string", "maxLength": 120 },
+        "related_characters": { "type": "array" },
+        "related_evidence": { "type": "array" },
+        "sort_order": { "type": "integer" },
+        "is_visible": { "type": "boolean" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": [
+        "id",
+        "case_id",
+        "case_status",
+        "evidence_code",
+        "title",
+        "evidence_type",
+        "description",
+        "chapter_number",
+        "access_condition",
+        "related_characters",
+        "related_evidence",
+        "sort_order",
+        "is_visible",
+        "createdAt"
+      ]
+    },
+    "CaseCharacter": {
+      "title": "CaseCharacter",
+      "description": "Character profile associated with a case",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128 },
+        "case_id": { "type": "string", "maxLength": 128 },
+        "case_status": { "type": "string", "maxLength": 32 },
+        "name": { "type": "string", "maxLength": 160 },
+        "role": { "type": "string", "maxLength": 160 },
+        "portrait_url": { "type": "string", "maxLength": 800000 },
+        "description": { "type": "string", "maxLength": 10000 },
+        "background": { "type": "string", "maxLength": 10000 },
+        "relationships": { "type": "array" },
+        "model_3d_id": { "type": "string", "maxLength": 128 },
+        "preferred_view": { "type": "string", "enum": ["STANDARD", "3D"] },
+        "is_public": { "type": "boolean" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": [
+        "id",
+        "case_id",
+        "case_status",
+        "name",
+        "role",
+        "description",
+        "background",
+        "relationships",
+        "is_public",
+        "createdAt"
+      ]
+    },
+    "CaseWitness": {
+      "title": "CaseWitness",
+      "description": "Witness testimony entry for a case",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128 },
+        "case_id": { "type": "string", "maxLength": 128 },
+        "case_status": { "type": "string", "maxLength": 32 },
+        "name": { "type": "string", "maxLength": 160 },
+        "role": { "type": "string", "maxLength": 160 },
+        "portrait_url": { "type": "string", "maxLength": 800000 },
+        "statement_text": { "type": "string", "maxLength": 20000 },
+        "chapter_number": { "type": "integer" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "case_id", "case_status", "name", "role", "statement_text", "chapter_number", "createdAt"]
+    },
+    "InterrogationQuestion": {
+      "title": "InterrogationQuestion",
+      "description": "Structured witness interrogation prompt and response",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128 },
+        "case_id": { "type": "string", "maxLength": 128 },
+        "case_status": { "type": "string", "maxLength": 32 },
+        "witness_id": { "type": "string", "maxLength": 128 },
+        "question_text": { "type": "string", "maxLength": 2000 },
+        "response_text": { "type": "string", "maxLength": 10000 },
+        "follow_up_hint": { "type": "string", "maxLength": 2000 },
+        "sort_order": { "type": "integer" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": [
+        "id",
+        "case_id",
+        "case_status",
+        "witness_id",
+        "question_text",
+        "response_text",
+        "follow_up_hint",
+        "sort_order",
+        "createdAt"
+      ]
+    },
+    "CaseHint": {
+      "title": "CaseHint",
+      "description": "Unlockable investigation hint under a case",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128 },
+        "case_id": { "type": "string", "maxLength": 128 },
+        "case_status": { "type": "string", "maxLength": 32 },
+        "chapter_number": { "type": "integer" },
+        "hint_order": { "type": "integer" },
+        "hint_text": { "type": "string", "maxLength": 5000 },
+        "unlock_condition": { "type": "string", "maxLength": 120 },
+        "is_enabled": { "type": "boolean" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": [
+        "id",
+        "case_id",
+        "case_status",
+        "chapter_number",
+        "hint_order",
+        "hint_text",
+        "unlock_condition",
+        "is_enabled",
+        "createdAt"
+      ]
+    },
+    "CaseSolution": {
+      "title": "CaseSolution",
+      "description": "Admin-only master solution and confidential case notes",
+      "type": "object",
+      "properties": {
+        "case_id": { "type": "string", "maxLength": 128 },
+        "master_solution": { "type": "string", "maxLength": 40000 },
+        "actual_timeline": { "type": "array" },
+        "responsible_character": { "type": "string", "maxLength": 200 },
+        "evidence_explanations": { "type": "array" },
+        "red_herrings": { "type": "array" },
+        "critical_clues": { "type": "array" },
+        "internal_notes": { "type": "string", "maxLength": 20000 },
+        "private_evidence_notes": { "type": "object" },
+        "private_character_notes": { "type": "object" },
+        "hidden_interrogation_rules": { "type": "object" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["case_id", "master_solution", "updatedAt"]
+    },
+    "CaseProgress": {
+      "title": "CaseProgress",
+      "description": "Player progress state for a specific case",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128 },
+        "user_id": { "type": "string", "maxLength": 128 },
+        "case_id": { "type": "string", "maxLength": 128 },
+        "status": { "type": "string", "enum": ["IN_PROGRESS", "SUBMITTED", "COMPLETED"] },
+        "current_chapter": { "type": "integer" },
+        "unlocked_hints": { "type": "array" },
+        "asked_questions": { "type": "array" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "user_id", "case_id", "status", "current_chapter", "unlocked_hints", "asked_questions", "updatedAt"]
+    },
+    "CaseNote": {
+      "title": "CaseNote",
+      "description": "Private detective notepad per player and case",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128 },
+        "user_id": { "type": "string", "maxLength": 128 },
+        "case_id": { "type": "string", "maxLength": 128 },
+        "content": { "type": "string", "maxLength": 50000 },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "user_id", "case_id", "content", "updatedAt"]
+    },
+    "TimelineEntry": {
+      "title": "TimelineEntry",
+      "description": "Player-constructed timeline marker",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128 },
+        "user_id": { "type": "string", "maxLength": 128 },
+        "case_id": { "type": "string", "maxLength": 128 },
+        "event_time": { "type": "string", "maxLength": 120 },
+        "event_title": { "type": "string", "maxLength": 240 },
+        "event_notes": { "type": "string", "maxLength": 4000 },
+        "sort_order": { "type": "integer" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "user_id", "case_id", "event_time", "event_title", "event_notes", "sort_order", "createdAt"]
+    },
+    "EvidenceConnection": {
+      "title": "EvidenceConnection",
+      "description": "Player-constructed link between two evidence items",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128 },
+        "user_id": { "type": "string", "maxLength": 128 },
+        "case_id": { "type": "string", "maxLength": 128 },
+        "source_evidence_id": { "type": "string", "maxLength": 128 },
+        "target_evidence_id": { "type": "string", "maxLength": 128 },
+        "connection_note": { "type": "string", "maxLength": 2000 },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "user_id", "case_id", "source_evidence_id", "target_evidence_id", "connection_note", "createdAt"]
+    },
+    "CaseReport": {
+      "title": "CaseReport",
+      "description": "Player final investigation report and admin evaluation",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128 },
+        "user_id": { "type": "string", "maxLength": 128 },
+        "player_name": { "type": "string", "maxLength": 120 },
+        "player_code": { "type": "string", "maxLength": 32 },
+        "case_id": { "type": "string", "maxLength": 128 },
+        "case_code": { "type": "string", "maxLength": 64 },
+        "case_title": { "type": "string", "maxLength": 200 },
+        "suspect_identified": { "type": "string", "maxLength": 200 },
+        "reasoning_text": { "type": "string", "maxLength": 30000 },
+        "evidence_references": { "type": "array" },
+        "timeline_summary": { "type": "string", "maxLength": 10000 },
+        "status": { "type": "string", "enum": ["SUBMITTED", "UNDER_REVIEW", "APPROVED", "REJECTED"] },
+        "score": { "type": "number" },
+        "decision": { "type": "string", "maxLength": 32 },
+        "feedback": { "type": "string", "maxLength": 10000 },
+        "career_action": { "type": "string", "maxLength": 500 },
+        "evaluated_by": { "type": "string", "maxLength": 128 },
+        "submitted_at": { "type": "string", "maxLength": 64 },
+        "evaluated_at": { "type": "string", "maxLength": 64 },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": [
+        "id",
+        "user_id",
+        "player_name",
+        "player_code",
+        "case_id",
+        "case_code",
+        "case_title",
+        "suspect_identified",
+        "reasoning_text",
+        "evidence_references",
+        "timeline_summary",
+        "status",
+        "submitted_at",
+        "createdAt",
+        "updatedAt"
+      ]
+    },
+    "MediaAsset": {
+      "title": "MediaAsset",
+      "description": "Uploaded or linked media asset",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128 },
+        "title": { "type": "string", "maxLength": 200 },
+        "file_name": { "type": "string", "maxLength": 240 },
+        "folder": { "type": "string", "maxLength": 80 },
+        "mime_type": { "type": "string", "maxLength": 80 },
+        "size_bytes": { "type": "integer" },
+        "url": { "type": "string", "maxLength": 800000 },
+        "source_type": { "type": "string", "maxLength": 40 },
+        "model_3d_id": { "type": "string", "maxLength": 128 },
+        "preferred_view": { "type": "string", "enum": ["STANDARD", "3D"] },
+        "is_public": { "type": "boolean" },
+        "uploaded_by": { "type": "string", "maxLength": 128 },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "title", "file_name", "folder", "mime_type", "size_bytes", "url", "source_type", "is_public", "uploaded_by", "createdAt"]
+    },
+    "DocumentAsset": {
+      "title": "DocumentAsset",
+      "description": "Case or confidential Directorate document asset",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128 },
+        "title": { "type": "string", "maxLength": 200 },
+        "file_name": { "type": "string", "maxLength": 240 },
+        "mime_type": { "type": "string", "maxLength": 80 },
+        "size_bytes": { "type": "integer" },
+        "data_url": { "type": "string", "maxLength": 800000 },
+        "is_confidential": { "type": "boolean" },
+        "case_id": { "type": "string", "maxLength": 128 },
+        "model_3d_id": { "type": "string", "maxLength": 128 },
+        "preferred_view": { "type": "string", "enum": ["STANDARD", "3D"] },
+        "uploaded_by": { "type": "string", "maxLength": 128 },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "title", "file_name", "mime_type", "size_bytes", "data_url", "is_confidential", "uploaded_by", "createdAt"]
+    },
+    "AudioAsset": {
+      "title": "AudioAsset",
+      "description": "Audio evidence recording and transcript",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128 },
+        "title": { "type": "string", "maxLength": 200 },
+        "description": { "type": "string", "maxLength": 5000 },
+        "transcript": { "type": "string", "maxLength": 30000 },
+        "file_name": { "type": "string", "maxLength": 240 },
+        "mime_type": { "type": "string", "maxLength": 80 },
+        "size_bytes": { "type": "integer" },
+        "url": { "type": "string", "maxLength": 800000 },
+        "case_id": { "type": "string", "maxLength": 128 },
+        "chapter_number": { "type": "integer" },
+        "is_public": { "type": "boolean" },
+        "uploaded_by": { "type": "string", "maxLength": 128 },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "title", "file_name", "mime_type", "size_bytes", "url", "chapter_number", "is_public", "uploaded_by", "createdAt"]
+    },
+    "Model3DAsset": {
+      "title": "Model3DAsset",
+      "description": "3D GLB/GLTF asset stored for Evidence 3D Studio",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128 },
+        "title": { "type": "string", "maxLength": 200 },
+        "file_name": { "type": "string", "maxLength": 240 },
+        "format": { "type": "string", "enum": ["GLB", "GLTF"] },
+        "mime_type": { "type": "string", "maxLength": 100 },
+        "size_bytes": { "type": "integer" },
+        "url": { "type": "string", "maxLength": 800000 },
+        "source_type": { "type": "string", "enum": ["UPLOAD", "AI_CONVERSION"] },
+        "source_image_url": { "type": "string", "maxLength": 800000 },
+        "linked_entity_type": { "type": "string", "maxLength": 32 },
+        "linked_entity_id": { "type": "string", "maxLength": 128 },
+        "provider": { "type": "string", "maxLength": 80 },
+        "external_task_id": { "type": "string", "maxLength": 128 },
+        "progress": { "type": "integer" },
+        "status": { "type": "string", "enum": ["QUEUED", "PROCESSING", "READY", "FAILED"] },
+        "error_message": { "type": "string", "maxLength": 2000 },
+        "is_public": { "type": "boolean" },
+        "uploaded_by": { "type": "string", "maxLength": 128 },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": [
+        "id",
+        "title",
+        "file_name",
+        "format",
+        "mime_type",
+        "size_bytes",
+        "url",
+        "source_type",
+        "provider",
+        "progress",
+        "status",
+        "is_public",
+        "uploaded_by",
+        "createdAt",
+        "updatedAt"
+      ]
+    },
+    "AdminLog": {
+      "title": "AdminLog",
+      "description": "Directorate audit log entry",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128 },
+        "actor_id": { "type": "string", "maxLength": 128 },
+        "actor_email": { "type": "string", "maxLength": 254 },
+        "action": { "type": "string", "maxLength": 80 },
+        "target_type": { "type": "string", "maxLength": 80 },
+        "target_id": { "type": "string", "maxLength": 128 },
+        "summary": { "type": "string", "maxLength": 1000 },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "actor_id", "actor_email", "action", "target_type", "target_id", "summary", "createdAt"]
+    }
+  },
+  "firestore": {
+    "/test/connection": {
+      "schema": { "$ref": "#/entities/ConnectionProbe" },
+      "description": "Connectivity verification document"
+    },
+    "/platform/bootstrap": {
+      "schema": { "$ref": "#/entities/PlatformBootstrap" },
+      "description": "Public site configuration, content sections, institutions, ranks, and regions"
+    },
+    "/admins/{uid}": {
+      "schema": { "$ref": "#/entities/AdminMarker" },
+      "description": "Authoritative admin membership markers"
+    },
+    "/users/{uid}": {
+      "schema": { "$ref": "#/entities/UserProfile" },
+      "description": "Non-PII investigator profiles"
+    },
+    "/users/{uid}/private/{docId}": {
+      "schema": { "$ref": "#/entities/UserPrivateInfo" },
+      "description": "PII-isolated email and verification state"
+    },
+    "/users/{uid}/notifications/{notifId}": {
+      "schema": { "$ref": "#/entities/NotificationItem" },
+      "description": "Per-user operational notifications"
+    },
+    "/users/{uid}/careerHistory/{entryId}": {
+      "schema": { "$ref": "#/entities/CareerHistoryEntry" },
+      "description": "Per-user rank and institution history"
+    },
+    "/users/{uid}/caseProgress/{caseId}": {
+      "schema": { "$ref": "#/entities/CaseProgress" },
+      "description": "Per-user case chapter, hints, and interrogation progress"
+    },
+    "/users/{uid}/caseNotes/{caseId}": {
+      "schema": { "$ref": "#/entities/CaseNote" },
+      "description": "Private detective notepad per user and case"
+    },
+    "/users/{uid}/timeline/{itemId}": {
+      "schema": { "$ref": "#/entities/TimelineEntry" },
+      "description": "Player timeline entries per case"
+    },
+    "/users/{uid}/connections/{connId}": {
+      "schema": { "$ref": "#/entities/EvidenceConnection" },
+      "description": "Player evidence connection board entries"
+    },
+    "/cases/{caseId}": {
+      "schema": { "$ref": "#/entities/CaseDossier" },
+      "description": "Case dossiers (drafts restricted to admins)"
+    },
+    "/cases/{caseId}/chapters/{chapterId}": {
+      "schema": { "$ref": "#/entities/CaseChapter" },
+      "description": "Case chapters"
+    },
+    "/cases/{caseId}/evidence/{evidenceId}": {
+      "schema": { "$ref": "#/entities/CaseEvidence" },
+      "description": "Player-safe case evidence items"
+    },
+    "/cases/{caseId}/characters/{charId}": {
+      "schema": { "$ref": "#/entities/CaseCharacter" },
+      "description": "Case character dossiers"
+    },
+    "/cases/{caseId}/witnesses/{witnessId}": {
+      "schema": { "$ref": "#/entities/CaseWitness" },
+      "description": "Case witnesses"
+    },
+    "/cases/{caseId}/interrogations/{questionId}": {
+      "schema": { "$ref": "#/entities/InterrogationQuestion" },
+      "description": "Witness interrogation questions"
+    },
+    "/cases/{caseId}/hints/{hintId}": {
+      "schema": { "$ref": "#/entities/CaseHint" },
+      "description": "Case hints"
+    },
+    "/caseSolutions/{caseId}": {
+      "schema": { "$ref": "#/entities/CaseSolution" },
+      "description": "Admin-only master solution and confidential case materials"
+    },
+    "/reports/{reportId}": {
+      "schema": { "$ref": "#/entities/CaseReport" },
+      "description": "Submitted investigation reports and Directorate evaluations"
+    },
+    "/mediaAssets/{assetId}": {
+      "schema": { "$ref": "#/entities/MediaAsset" },
+      "description": "Uploaded or linked media images"
+    },
+    "/documents/{docId}": {
+      "schema": { "$ref": "#/entities/DocumentAsset" },
+      "description": "Document assets with confidential access isolation"
+    },
+    "/audioAssets/{audioId}": {
+      "schema": { "$ref": "#/entities/AudioAsset" },
+      "description": "Audio recordings and transcripts"
+    },
+    "/models3d/{modelId}": {
+      "schema": { "$ref": "#/entities/Model3DAsset" },
+      "description": "3D GLB/GLTF models for Evidence 3D Studio"
+    },
+    "/adminLogs/{logId}": {
+      "schema": { "$ref": "#/entities/AdminLog" },
+      "description": "Admin-only operational audit logs"
+    }
+  }
+}
