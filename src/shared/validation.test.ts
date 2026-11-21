@@ -50,6 +50,25 @@ test('validateCaseForPublish accepts complete validated case', () => {
   });
   assert.equal(res.valid, true);
   assert.equal(res.errors.length, 0);
+
+  const numericDuration = validateCaseForPublish({
+    case_code: 'AP-DHK-001',
+    title: 'Midnight Signal at Sadarghat',
+    short_description: 'A missing cargo manifest leads investigators along the Buriganga.',
+    full_story:
+      'At 02:14 AM, port security reported an irregular customs seal near Terminal 4.',
+    institution_id: 1,
+    region_id: 1,
+    difficulty: 'STANDARD',
+    estimated_duration: '5',
+    player_tasks: ['Identify the forged customs seal'],
+    evaluation_criteria: ['Correctly link manifest discrepancies to dock logs'],
+    chaptersCount: 1,
+    evidenceCount: 2,
+    hasMasterSolution: true,
+    masterSolutionText: 'The night shift supervisor altered manifest #44B.',
+  });
+  assert.equal(numericDuration.valid, true);
 });
 
 test('canTransitionCaseStatus restricts archived direct publish', () => {

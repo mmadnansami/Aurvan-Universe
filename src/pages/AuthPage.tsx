@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { Navigate, useNavigate } from 'react-router-dom';
 import { apiFetch } from '../lib/api';
 import { usePlatform } from '../context/PlatformContext';
+import { OFFICIAL_PLATFORM_LOGO_URL } from '../shared/defaultBootstrap';
 
 type AuthMode = 'login' | 'register' | 'forgot' | 'reset' | 'verify';
 
@@ -23,7 +24,7 @@ export function AuthPage() {
     return <Navigate to={user.role === 'PLAYER' ? '/dashboard' : '/admin'} replace />;
   }
 
-  const logoUrl = bootstrap?.settings?.platform_logo_url;
+  const logoUrl = bootstrap?.settings?.platform_logo_url ?? OFFICIAL_PLATFORM_LOGO_URL;
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();

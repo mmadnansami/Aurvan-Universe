@@ -3,6 +3,7 @@ import { Search } from 'lucide-react';
 import { apiFetch } from '../../lib/api';
 import { usePlatform } from '../../context/PlatformContext';
 import { ConfirmDialog } from '../../components/ConfirmDialog';
+import { parseIntInRange, sanitizeDigitInput } from '../../shared/numericInput';
 
 export function AdminOperationsTab({ mode }: { mode: 'players' | 'reports' | 'logs' }) {
   const { bootstrap } = usePlatform();
@@ -21,10 +22,11 @@ export function AdminOperationsTab({ mode }: { mode: 'players' | 'reports' | 'lo
 
   // Report evaluation form
   const [evalReport, setEvalReport] = useState<any>(null);
-  const [evalScore, setEvalScore] = useState(85);
+  const [evalScore, setEvalScore] = useState('85');
   const [evalDecision, setEvalDecision] = useState<'APPROVED' | 'REJECTED'>('APPROVED');
   const [evalFeedback, setEvalFeedback] = useState('');
   const [evalCareerAction, setEvalCareerAction] = useState('');
+  const [evalError, setEvalError] = useState('');
 
   const load = async () => {
     setLoading(true);
@@ -79,17 +81,27 @@ export function AdminOperationsTab({ mode }: { mode: 'players' | 'reports' | 'lo
   const handleEvaluateReport = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!evalReport) return;
-    await apiFetch(`/api/admin/reports/${evalReport.id}/evaluate`, {
-      method: 'POST',
-      body: JSON.stringify({
-        score: evalScore,
-        decision: evalDecision,
-        feedback: evalFeedback,
-        career_action: evalCareerAction,
-      }),
-    });
-    setEvalReport(null);
-    await load();
+    setEvalError('');
+    const parsedScore = parseIntInRange(evalScore, 0, 100);
+    if (parsedScore === null) {
+      setEvalError('Score must be a whole number between 0 and 100.');
+      return;
+    }
+    try {
+      await apiFetch(`/api/admin/reports/${evalReport.id}/evaluate`, {
+        method: 'POST',
+        body: JSON.stringify({
+          score: parsedScore,
+          decision: evalDecision,
+          feedback: evalFeedback,
+          career_action: evalCareerAction,
+        }),
+      });
+      setEvalReport(null);
+      await load();
+    } catch (err: any) {
+      setEvalError(err.message || 'Could not evaluate report.');
+    }
   };
 
   const institutions = bootstrap?.institutions || [];
@@ -307,10 +319,11 @@ export function AdminOperationsTab({ mode }: { mode: 'players' | 'reports' | 'lo
                         type="button"
                         onClick={() => {
                           setEvalReport(rep);
-                          setEvalScore(rep.score ?? 85);
+                          setEvalScore(String(rep.score ?? 85));
                           setEvalDecision(rep.decision || 'APPROVED');
                           setEvalFeedback(rep.feedback || '');
                           setEvalCareerAction(rep.career_action || '');
+                          setEvalError('');
                         }}
                         className="rounded bg-[#C9A45C] px-3 py-1.5 text-xs font-semibold text-[#070B13]"
                       >
@@ -344,15 +357,23 @@ export function AdminOperationsTab({ mode }: { mode: 'players' | 'reports' | 'lo
               <h3 className="font-display text-2xl font-semibold text-white">
                 Evaluate Report — {evalReport.player_name} ({evalReport.case_code})
               </h3>
+              {evalError && (
+                <div role="alert" className="rounded-md border border-red-800 bg-red-950/50 px-4 py-2.5 text-xs text-red-200">
+                  {evalError}
+                </div>
+              )}
               <div className="grid gap-4 sm:grid-cols-3">
                 <div>
-                  <label className="block text-xs text-slate-300 mb-1">Score (0–100)</label>
+                  <label htmlFor="eval-report-score" className="block text-xs text-slate-300 mb-1">
+                    Score (0–100)
+                  </label>
                   <input
-                    type="number"
-                    min={0}
-                    max={100}
+                    id="eval-report-score"
+                    type="text"
+                    inputMode="numeric"
                     value={evalScore}
-                    onChange={(e) => setEvalScore(Number(e.target.value))}
+                    onChange={(e) => setEvalScore(sanitizeDigitInput(e.target.value))}
+                    placeholder="0–100"
                     className="w-full rounded border border-slate-700 bg-[#070B13] px-3 py-2 text-sm text-white"
                   />
                 </div>

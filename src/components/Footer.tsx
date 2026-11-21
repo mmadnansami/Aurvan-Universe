@@ -1,5 +1,6 @@
 import { Link } from 'react-router-dom';
 import { usePlatform } from '../context/PlatformContext';
+import { OFFICIAL_PLATFORM_LOGO_URL } from '../shared/defaultBootstrap';
 
 export function Footer() {
   const { bootstrap } = usePlatform();
@@ -8,7 +9,7 @@ export function Footer() {
   const disclaimer =
     bootstrap?.content?.footer_disclaimer?.body ||
     'AURVAN UNIVERSE is an independent fictional investigation and educational mystery platform inspired by Bangladesh. It is not a real government agency, police department, intelligence service, or law enforcement organization.';
-  const logoUrl = bootstrap?.settings?.platform_logo_url;
+  const logoUrl = bootstrap?.settings?.platform_logo_url ?? OFFICIAL_PLATFORM_LOGO_URL;
 
   return (
     <footer className="border-t border-slate-800/80 bg-[#05080F] text-slate-400">

@@ -50,7 +50,15 @@ export async function apiFetch<T = any>(path: string, options: RequestInit = {})
   });
 
   const contentType = response.headers.get('content-type') || '';
-  const data = contentType.includes('application/json') ? await response.json() : await response.text();
+  const isJson = contentType.includes('application/json');
+  const data = isJson ? await response.json() : await response.text();
+
+  if (path.startsWith('/api/') && !isJson) {
+    throw new ApiError(
+      'Backend API service is unavailable in this deployment environment.',
+      response.status === 200 ? 503 : response.status
+    );
+  }
 
   if (!response.ok) {
     const message =

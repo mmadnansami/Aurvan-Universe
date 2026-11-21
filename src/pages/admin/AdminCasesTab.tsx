@@ -6,6 +6,7 @@ import { usePlatform } from '../../context/PlatformContext';
 import { ConfirmDialog } from '../../components/ConfirmDialog';
 import { Evidence3DStudioModal, type StudioTargetAsset } from '../../components/Evidence3DStudioModal';
 import { ImagePickerModal } from '../../components/ImagePickerModal';
+import { parsePositiveInt, sanitizeDigitInput } from '../../shared/numericInput';
 import type { CaseStatus, Model3DAsset, PreferredViewMode } from '../../shared/types';
 
 type EditorStep =
@@ -43,7 +44,7 @@ export function AdminCasesTab() {
   const [models3d, setModels3d] = useState<Model3DAsset[]>([]);
 
   // Sub-entity forms
-  const [chapNum, setChapNum] = useState(1);
+  const [chapNum, setChapNum] = useState('1');
   const [chapTitle, setChapTitle] = useState('');
   const [chapText, setChapText] = useState('');
 
@@ -56,7 +57,7 @@ export function AdminCasesTab() {
   const [evAudioId, setEvAudioId] = useState('');
   const [evModel3dId, setEvModel3dId] = useState('');
   const [evPreferredView, setEvPreferredView] = useState<PreferredViewMode>('STANDARD');
-  const [evChapter, setEvChapter] = useState(1);
+  const [evChapter, setEvChapter] = useState('1');
   const [evPrivateExp, setEvPrivateExp] = useState('');
 
   const [charName, setCharName] = useState('');
@@ -72,7 +73,7 @@ export function AdminCasesTab() {
   const [witName, setWitName] = useState('');
   const [witRole, setWitRole] = useState('');
   const [witStatement, setWitStatement] = useState('');
-  const [witChapter, setWitChapter] = useState(1);
+  const [witChapter, setWitChapter] = useState('1');
 
   const [inqWitnessId, setInqWitnessId] = useState('');
   const [inqQuestion, setInqQuestion] = useState('');
@@ -80,12 +81,13 @@ export function AdminCasesTab() {
   const [inqHint, setInqHint] = useState('');
   const [inqHiddenRule, setInqHiddenRule] = useState('');
 
-  const [hintChapter, setHintChapter] = useState(1);
-  const [hintOrder, setHintOrder] = useState(1);
+  const [hintChapter, setHintChapter] = useState('1');
+  const [hintOrder, setHintOrder] = useState('1');
   const [hintText, setHintText] = useState('');
 
   // Editable metadata & solution fields
   const [metaForm, setMetaForm] = useState<any>(null);
+  const [minRankInput, setMinRankInput] = useState('1');
   const [tasksText, setTasksText] = useState('');
   const [criteriaText, setCriteriaText] = useState('');
   const [solForm, setSolForm] = useState<any>(null);
@@ -112,6 +114,7 @@ export function AdminCasesTab() {
       const res = await apiFetch<any>(`/api/admin/cases/${id}`);
       setBundle(res);
       setMetaForm({ ...res.caseData });
+      setMinRankInput(String(res.caseData.min_rank_order ?? 1));
       setTasksText((res.caseData.player_tasks || []).join('\n'));
       setCriteriaText((res.caseData.evaluation_criteria || []).join('\n'));
       setSolForm({
@@ -164,16 +167,24 @@ export function AdminCasesTab() {
     if (!selectedId || !metaForm) return;
     setError('');
     setSuccess('');
+    const parsedMinRank = parsePositiveInt(minRankInput);
+    if (!parsedMinRank) {
+      setError('Min Rank Order must be a number of 1 or greater.');
+      return;
+    }
     try {
       const updated = await apiFetch<any>(`/api/admin/cases/${selectedId}`, {
         method: 'PUT',
         body: JSON.stringify({
           ...metaForm,
+          min_rank_order: parsedMinRank,
           player_tasks: tasksText.split('\n').map((s) => s.trim()).filter(Boolean),
           evaluation_criteria: criteriaText.split('\n').map((s) => s.trim()).filter(Boolean),
         }),
       });
       setBundle(updated);
+      setMetaForm({ ...updated.caseData });
+      setMinRankInput(String(updated.caseData.min_rank_order ?? parsedMinRank));
       await loadCases();
       setSuccess('Draft metadata saved.');
     } catch (err: any) {
@@ -459,6 +470,7 @@ export function AdminCasesTab() {
                     type="text"
                     value={metaForm.estimated_duration}
                     onChange={(e) => setMetaForm({ ...metaForm, estimated_duration: e.target.value })}
+                    placeholder="e.g. 60 mins or 10"
                     className="w-full rounded border border-slate-700 bg-[#070B13] px-3 py-2 text-sm text-white"
                   />
                 </div>
@@ -556,13 +568,16 @@ export function AdminCasesTab() {
                   </div>
                 </div>
                 <div>
-                  <label className="block text-xs text-slate-300 mb-1">Min Rank Order (1-3)</label>
+                  <label htmlFor="case-min-rank-order" className="block text-xs text-slate-300 mb-1">
+                    Min Rank Order
+                  </label>
                   <input
-                    type="number"
-                    min={1}
-                    max={3}
-                    value={metaForm.min_rank_order}
-                    onChange={(e) => setMetaForm({ ...metaForm, min_rank_order: Number(e.target.value) })}
+                    id="case-min-rank-order"
+                    type="text"
+                    inputMode="numeric"
+                    value={minRankInput}
+                    onChange={(e) => setMinRankInput(sanitizeDigitInput(e.target.value))}
+                    placeholder="e.g. 1"
                     className="w-full rounded border border-slate-700 bg-[#070B13] px-3 py-2 text-sm text-white"
                   />
                 </div>
@@ -625,10 +640,11 @@ export function AdminCasesTab() {
             <div className="space-y-4">
               <div className="grid gap-4 sm:grid-cols-4">
                 <input
-                  type="number"
-                  min={1}
+                  type="text"
+                  inputMode="numeric"
+                  aria-label="Chapter number"
                   value={chapNum}
-                  onChange={(e) => setChapNum(Number(e.target.value))}
+                  onChange={(e) => setChapNum(sanitizeDigitInput(e.target.value))}
                   placeholder="Ch #"
                   className="rounded border border-slate-700 bg-[#070B13] px-3 py-2 text-sm text-white"
                 />
@@ -652,6 +668,11 @@ export function AdminCasesTab() {
                 onClick={async () => {
                   setError('');
                   setSuccess('');
+                  const parsedChapNum = parsePositiveInt(chapNum);
+                  if (!parsedChapNum) {
+                    setError('Chapter number must be 1 or greater.');
+                    return;
+                  }
                   if (!chapTitle.trim() || !chapText.trim()) {
                     setError('Chapter title and briefing text are required.');
                     return;
@@ -660,7 +681,7 @@ export function AdminCasesTab() {
                     const res = await apiFetch(`/api/admin/cases/${selectedId}/chapters`, {
                       method: 'POST',
                       body: JSON.stringify({
-                        chapter_number: chapNum,
+                        chapter_number: parsedChapNum,
                         title: chapTitle.trim(),
                         briefing_text: chapText.trim(),
                       }),
@@ -668,7 +689,7 @@ export function AdminCasesTab() {
                     setBundle(res);
                     setChapTitle('');
                     setChapText('');
-                    setChapNum((prev) => prev + 1);
+                    setChapNum(String(parsedChapNum + 1));
                     setSuccess('Chapter added to dossier.');
                   } catch (err: any) {
                     setError(err.message || 'Could not add chapter.');
@@ -790,10 +811,11 @@ export function AdminCasesTab() {
               </div>
               <div className="grid gap-3 sm:grid-cols-4">
                 <input
-                  type="number"
-                  min={1}
+                  type="text"
+                  inputMode="numeric"
+                  aria-label="Evidence chapter number"
                   value={evChapter}
-                  onChange={(e) => setEvChapter(Number(e.target.value))}
+                  onChange={(e) => setEvChapter(sanitizeDigitInput(e.target.value))}
                   placeholder="Chapter #"
                   className="rounded border border-slate-700 bg-[#070B13] px-3 py-2 text-xs text-white"
                 />
@@ -836,6 +858,11 @@ export function AdminCasesTab() {
                 onClick={async () => {
                   setError('');
                   setSuccess('');
+                  const parsedEvChapter = parsePositiveInt(evChapter);
+                  if (!parsedEvChapter) {
+                    setError('Evidence chapter number must be 1 or greater.');
+                    return;
+                  }
                   if (!evCode.trim() || !evTitle.trim()) {
                     setError('Evidence code and title are required.');
                     return;
@@ -853,7 +880,7 @@ export function AdminCasesTab() {
                         audio_id: evAudioId || null,
                         model_3d_id: evModel3dId || null,
                         preferred_view: evModel3dId ? evPreferredView : 'STANDARD',
-                        chapter_number: evChapter,
+                        chapter_number: parsedEvChapter,
                         private_explanation: evPrivateExp,
                       }),
                     });
@@ -1149,11 +1176,12 @@ export function AdminCasesTab() {
                     className="rounded border border-slate-700 bg-[#070B13] px-3 py-2 text-sm text-white"
                   />
                   <input
-                    type="number"
-                    min={1}
+                    type="text"
+                    inputMode="numeric"
+                    aria-label="Witness chapter number"
                     value={witChapter}
-                    onChange={(e) => setWitChapter(Number(e.target.value))}
-                    placeholder="Chapter"
+                    onChange={(e) => setWitChapter(sanitizeDigitInput(e.target.value))}
+                    placeholder="Chapter #"
                     className="rounded border border-slate-700 bg-[#070B13] px-3 py-2 text-sm text-white"
                   />
                 </div>
@@ -1169,6 +1197,11 @@ export function AdminCasesTab() {
                   onClick={async () => {
                     setError('');
                     setSuccess('');
+                    const parsedWitChapter = parsePositiveInt(witChapter);
+                    if (!parsedWitChapter) {
+                      setError('Witness chapter number must be 1 or greater.');
+                      return;
+                    }
                     if (!witName.trim() || !witStatement.trim()) {
                       setError('Witness name and initial statement are required.');
                       return;
@@ -1180,7 +1213,7 @@ export function AdminCasesTab() {
                           name: witName.trim(),
                           role: witRole.trim(),
                           statement_text: witStatement.trim(),
-                          chapter_number: witChapter,
+                          chapter_number: parsedWitChapter,
                         }),
                       });
                       setBundle(res);
@@ -1313,18 +1346,20 @@ export function AdminCasesTab() {
             <div className="space-y-4">
               <div className="grid gap-3 sm:grid-cols-4">
                 <input
-                  type="number"
-                  min={1}
+                  type="text"
+                  inputMode="numeric"
+                  aria-label="Hint chapter number"
                   value={hintChapter}
-                  onChange={(e) => setHintChapter(Number(e.target.value))}
+                  onChange={(e) => setHintChapter(sanitizeDigitInput(e.target.value))}
                   placeholder="Chapter"
                   className="rounded border border-slate-700 bg-[#070B13] px-3 py-2 text-sm text-white"
                 />
                 <input
-                  type="number"
-                  min={1}
+                  type="text"
+                  inputMode="numeric"
+                  aria-label="Hint order number"
                   value={hintOrder}
-                  onChange={(e) => setHintOrder(Number(e.target.value))}
+                  onChange={(e) => setHintOrder(sanitizeDigitInput(e.target.value))}
                   placeholder="Order"
                   className="rounded border border-slate-700 bg-[#070B13] px-3 py-2 text-sm text-white"
                 />
@@ -1341,6 +1376,12 @@ export function AdminCasesTab() {
                 onClick={async () => {
                   setError('');
                   setSuccess('');
+                  const parsedHintChapter = parsePositiveInt(hintChapter);
+                  const parsedHintOrder = parsePositiveInt(hintOrder);
+                  if (!parsedHintChapter || !parsedHintOrder) {
+                    setError('Hint chapter and order numbers must be 1 or greater.');
+                    return;
+                  }
                   if (!hintText.trim()) {
                     setError('Hint text is required.');
                     return;
@@ -1349,14 +1390,14 @@ export function AdminCasesTab() {
                     const res = await apiFetch(`/api/admin/cases/${selectedId}/hints`, {
                       method: 'POST',
                       body: JSON.stringify({
-                        chapter_number: hintChapter,
-                        hint_order: hintOrder,
+                        chapter_number: parsedHintChapter,
+                        hint_order: parsedHintOrder,
                         hint_text: hintText.trim(),
                       }),
                     });
                     setBundle(res);
                     setHintText('');
-                    setHintOrder((prev) => prev + 1);
+                    setHintOrder(String(parsedHintOrder + 1));
                     setSuccess('Hint added to dossier.');
                   } catch (err: any) {
                     setError(err.message || 'Could not add hint.');

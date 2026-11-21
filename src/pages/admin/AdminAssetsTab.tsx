@@ -3,6 +3,7 @@ import { Box, FileText, Trash2, Upload, Volume2 } from 'lucide-react';
 import { apiFetch, getStoredToken } from '../../lib/api';
 import { ConfirmDialog } from '../../components/ConfirmDialog';
 import { Evidence3DStudioModal, type StudioTargetAsset } from '../../components/Evidence3DStudioModal';
+import { parsePositiveInt, sanitizeDigitInput } from '../../shared/numericInput';
 import type { AudioAsset, DocumentAsset } from '../../shared/types';
 
 export function AdminAssetsTab({ mode }: { mode: 'documents' | 'audio' }) {
@@ -23,7 +24,7 @@ export function AdminAssetsTab({ mode }: { mode: 'documents' | 'audio' }) {
   const [audDesc, setAudDesc] = useState('');
   const [audTranscript, setAudTranscript] = useState('');
   const [audCaseId, setAudCaseId] = useState('');
-  const [audChapter, setAudChapter] = useState(1);
+  const [audChapter, setAudChapter] = useState('1');
 
   const [deleteId, setDeleteId] = useState<string | null>(null);
 
@@ -68,6 +69,12 @@ export function AdminAssetsTab({ mode }: { mode: 'documents' | 'audio' }) {
   const handleUploadAudio = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
+    const parsedChapter = parsePositiveInt(audChapter);
+    if (!parsedChapter) {
+      setError('Chapter number must be 1 or greater.');
+      e.target.value = '';
+      return;
+    }
     setUploading(true);
     setError('');
     try {
@@ -77,7 +84,7 @@ export function AdminAssetsTab({ mode }: { mode: 'documents' | 'audio' }) {
       fd.append('description', audDesc);
       fd.append('transcript', audTranscript);
       if (audCaseId) fd.append('case_id', audCaseId);
-      fd.append('chapter_number', String(audChapter));
+      fd.append('chapter_number', String(parsedChapter));
       await apiFetch('/api/admin/audio', { method: 'POST', body: fd });
       setAudTitle('');
       setAudDesc('');
@@ -282,12 +289,16 @@ export function AdminAssetsTab({ mode }: { mode: 'documents' | 'audio' }) {
               </select>
             </div>
             <div>
-              <label className="block text-xs text-slate-300 mb-1">Chapter Number</label>
+              <label htmlFor="audio-chapter-number" className="block text-xs text-slate-300 mb-1">
+                Chapter Number
+              </label>
               <input
-                type="number"
-                min={1}
+                id="audio-chapter-number"
+                type="text"
+                inputMode="numeric"
                 value={audChapter}
-                onChange={(e) => setAudChapter(Number(e.target.value))}
+                onChange={(e) => setAudChapter(sanitizeDigitInput(e.target.value))}
+                placeholder="e.g. 1"
                 className="w-full rounded border border-slate-700 bg-[#070B13] px-3 py-2 text-sm text-white"
               />
             </div>

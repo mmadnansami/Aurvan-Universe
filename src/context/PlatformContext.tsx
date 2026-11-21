@@ -1,14 +1,13 @@
 import React, { createContext, useCallback, useContext, useEffect, useState } from 'react';
 import { apiFetch, setStoredToken } from '../lib/api';
-import type { Institution, PublicUser, Rank, Region, SiteContentItem } from '../shared/types';
+import {
+  DEFAULT_BOOTSTRAP_DATA,
+  isValidBootstrapPayload,
+  type BootstrapPayload,
+} from '../shared/defaultBootstrap';
+import type { PublicUser } from '../shared/types';
 
-export interface BootstrapData {
-  settings: Record<string, string>;
-  content: Record<string, SiteContentItem>;
-  institutions: Institution[];
-  ranks: Rank[];
-  regions: Region[];
-}
+export type BootstrapData = BootstrapPayload;
 
 interface PlatformContextValue {
   user: PublicUser | null;
@@ -25,18 +24,24 @@ const PlatformContext = createContext<PlatformContextValue | undefined>(undefine
 
 export function PlatformProvider({ children }: { children: React.ReactNode }) {
   const [user, setUser] = useState<PublicUser | null>(null);
-  const [bootstrap, setBootstrap] = useState<BootstrapData | null>(null);
+  const [bootstrap, setBootstrap] = useState<BootstrapData | null>(DEFAULT_BOOTSTRAP_DATA);
   const [loading, setLoading] = useState(true);
 
   const refreshBootstrap = useCallback(async () => {
-    const data = await apiFetch<BootstrapData>('/api/public/bootstrap');
-    setBootstrap(data);
+    try {
+      const data = await apiFetch<BootstrapData>('/api/public/bootstrap');
+      if (isValidBootstrapPayload(data)) {
+        setBootstrap(data);
+      }
+    } catch {
+      // Preserve canonical DEFAULT_BOOTSTRAP_DATA on static hosts or transient API errors
+    }
   }, []);
 
   const refreshUser = useCallback(async () => {
     try {
       const data = await apiFetch<{ authenticated: boolean; user: PublicUser | null }>('/api/auth/me');
-      setUser(data.authenticated ? data.user : null);
+      setUser(data && typeof data === 'object' && data.authenticated ? data.user : null);
     } catch {
       setUser(null);
     }

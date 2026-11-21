@@ -1,3 +1,4 @@
+import { Suspense, lazy } from 'react';
 import { BrowserRouter, Route, Routes } from 'react-router-dom';
 import { PlatformProvider, usePlatform } from './context/PlatformContext';
 import { Navbar } from './components/Navbar';
@@ -8,11 +9,30 @@ import { InstitutionsPage } from './pages/InstitutionsPage';
 import { RegionsPage } from './pages/RegionsPage';
 import { CaseLibraryPage } from './pages/CaseLibraryPage';
 import { CareerPage } from './pages/CareerPage';
-import { HallOfFamePage } from './pages/HallOfFamePage';
-import { AuthPage } from './pages/AuthPage';
-import { PlayerDashboardPage } from './pages/PlayerDashboardPage';
-import { InvestigationRoomPage } from './pages/InvestigationRoomPage';
-import { AdminDashboardPage } from './pages/AdminDashboardPage';
+
+const HallOfFamePage = lazy(() =>
+  import('./pages/HallOfFamePage').then((m) => ({ default: m.HallOfFamePage }))
+);
+const AuthPage = lazy(() =>
+  import('./pages/AuthPage').then((m) => ({ default: m.AuthPage }))
+);
+const PlayerDashboardPage = lazy(() =>
+  import('./pages/PlayerDashboardPage').then((m) => ({ default: m.PlayerDashboardPage }))
+);
+const InvestigationRoomPage = lazy(() =>
+  import('./pages/InvestigationRoomPage').then((m) => ({ default: m.InvestigationRoomPage }))
+);
+const AdminDashboardPage = lazy(() =>
+  import('./pages/AdminDashboardPage').then((m) => ({ default: m.AdminDashboardPage }))
+);
+
+function RouteLoadingFallback() {
+  return (
+    <div className="flex min-h-[50vh] items-center justify-center bg-[#070B13] text-sm text-slate-400">
+      Loading Directorate module...
+    </div>
+  );
+}
 
 function AppShell() {
   const { bootstrap } = usePlatform();
@@ -27,19 +47,21 @@ function AppShell() {
         </div>
       )}
       <main className="flex-1">
-        <Routes>
-          <Route path="/" element={<HomePage />} />
-          <Route path="/universe" element={<UniversePage />} />
-          <Route path="/institutions" element={<InstitutionsPage />} />
-          <Route path="/regions" element={<RegionsPage />} />
-          <Route path="/cases" element={<CaseLibraryPage />} />
-          <Route path="/career" element={<CareerPage />} />
-          <Route path="/hall-of-fame" element={<HallOfFamePage />} />
-          <Route path="/auth" element={<AuthPage />} />
-          <Route path="/dashboard" element={<PlayerDashboardPage />} />
-          <Route path="/investigate/:caseId" element={<InvestigationRoomPage />} />
-          <Route path="/admin" element={<AdminDashboardPage />} />
-        </Routes>
+        <Suspense fallback={<RouteLoadingFallback />}>
+          <Routes>
+            <Route path="/" element={<HomePage />} />
+            <Route path="/universe" element={<UniversePage />} />
+            <Route path="/institutions" element={<InstitutionsPage />} />
+            <Route path="/regions" element={<RegionsPage />} />
+            <Route path="/cases" element={<CaseLibraryPage />} />
+            <Route path="/career" element={<CareerPage />} />
+            <Route path="/hall-of-fame" element={<HallOfFamePage />} />
+            <Route path="/auth" element={<AuthPage />} />
+            <Route path="/dashboard" element={<PlayerDashboardPage />} />
+            <Route path="/investigate/:caseId" element={<InvestigationRoomPage />} />
+            <Route path="/admin" element={<AdminDashboardPage />} />
+          </Routes>
+        </Suspense>
       </main>
       <Footer />
     </div>

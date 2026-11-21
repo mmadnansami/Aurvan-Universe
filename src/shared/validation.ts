@@ -29,7 +29,7 @@ export function validateCaseForPublish(data: CaseValidationPayload): ValidationR
   if (!data.difficulty) {
     errors.push('Difficulty classification is required.');
   }
-  if (!data.estimated_duration || data.estimated_duration.trim().length < 2) {
+  if (!data.estimated_duration || data.estimated_duration.trim().length < 1) {
     errors.push('Estimated investigation duration is required.');
   }
   if (data.chaptersCount < 1) {

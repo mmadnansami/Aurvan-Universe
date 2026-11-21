@@ -5,6 +5,7 @@ import { usePlatform } from '../context/PlatformContext';
 import { apiFetch } from '../lib/api';
 import { InstitutionLogo } from '../components/InstitutionLogo';
 import { BangladeshMap } from '../components/BangladeshMap';
+import { OFFICIAL_PLATFORM_LOGO_URL } from '../shared/defaultBootstrap';
 import type { PublicCaseSummary, Region } from '../shared/types';
 
 export function HomePage() {
@@ -41,7 +42,7 @@ export function HomePage() {
   const announcement = bootstrap?.content?.announcement_banner;
   const institutions = bootstrap?.institutions || [];
   const regions = bootstrap?.regions || [];
-  const platformLogo = bootstrap?.settings?.platform_logo_url;
+  const platformLogo = bootstrap?.settings?.platform_logo_url ?? OFFICIAL_PLATFORM_LOGO_URL;
   const heroExtra = (() => {
     try {
       return hero?.extra_json ? JSON.parse(hero.extra_json) : {};
